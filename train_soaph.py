@@ -5,6 +5,8 @@ with open(sys.argv[0]) as f:
 import uuid
 import time
 import copy
+import argparse
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -15,109 +17,11 @@ torch.empty(1, device="cuda", requires_grad=True).backward() # prevents a bug on
 from torch import Tensor, nn
 import torch.nn.functional as F
 import torch.distributed as dist
+from soaph import SOAPH
 # use of FlexAttention contributed by @KoszarskyB
 from torch.nn.attention.flex_attention import BlockMask, flex_attention
 # torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
-
-torch._dynamo.config.compiled_autograd = False  # TEMPORARILY DISABLED: Testing compatibility with flex_attention
-# -----------------------------------------------------------------------------
-# Muon optimizer
-
-def zeropower_via_newtonschulz5(G: Tensor) -> Tensor:
-    """
-    Newton-Schulz iteration to compute the zeroth power / orthogonalization of G. We opt to use a
-    quintic iteration whose coefficients are selected to maximize the slope at zero. For the purpose
-    of minimizing steps, it turns out to be empirically effective to keep increasing the slope at
-    zero even beyond the point where the iteration no longer converges all the way to one everywhere
-    on the interval. This iteration therefore does not produce UV^T but rather something like US'V^T
-    where S' is diagonal with S_{ii}' ∈ [1 - l, 1 + r], which turns out not to hurt model
-    performance at all relative to UV^T, where USV^T = G is the SVD.
-    """
-    assert G.ndim >= 2 # batched Muon implementation by @scottjmaddox, and put into practice in the record by @YouJiacheng
-    X = G.bfloat16()
-    if G.size(-2) > G.size(-1):
-        X = X.mT
-
-    # Ensure spectral norm is at most 1
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) + 1e-7)
-    # Perform the NS iterations
-    for a, b, c in [
-        (4.0848, -6.8946, 2.9270),
-        (3.9505, -6.3029, 2.6377),
-        (3.7418, -5.5913, 2.3037),
-        (2.8769, -3.1427, 1.2046),
-        (2.8366, -3.0525, 1.2012),
-    ]:
-        A = X @ X.mT
-        B = b * A + c * A @ A # quintic computation strategy adapted from suggestion by @jxbz, @leloykun, and @YouJiacheng
-        X = a * X + B @ X
-
-    if G.size(-2) > G.size(-1):
-        X = X.mT
-    return X
-    
-@torch.compile
-def update(acc_bf16_view_u16: Tensor, mantissa: Tensor, momentum_buffer: Tensor, grad: Tensor, momentum: Tensor, eff_lr: Tensor, eff_weight_decay: Tensor):
-    assert acc_bf16_view_u16.dtype == mantissa.dtype == torch.uint16
-    grad = grad.float()
-    momentum_buffer.copy_(momentum * momentum_buffer + (1 - momentum) * grad)
-    v = zeropower_via_newtonschulz5(momentum * momentum_buffer + (1 - momentum) * grad)
-    acc_m_u32 = (acc_bf16_view_u16.to(torch.uint32) << 16) | mantissa.to(torch.uint32)
-    # acc_m_u32.view(torch.float32).add_(other=v, alpha=-eff_lr)
-    # For batched parameters (e.g., qkvo_w with shape [4, hdim, dim]), compute norm over last 2 dims
-    norm_dims = (-2, -1) if grad.ndim >= 2 else None
-    fro_norm = acc_m_u32.view(torch.float32).norm(p='fro', dim=norm_dims, keepdim=True)
-    v_norm = v.norm(p='fro', dim=norm_dims, keepdim=True)
-    acc_m_u32.view(torch.float32).add_(other=v, alpha=-eff_lr * fro_norm / v_norm)
-    fro_norm_new = acc_m_u32.view(torch.float32).norm(p='fro', dim=norm_dims, keepdim=True)
-    acc_m_u32.view(torch.float32).mul_(fro_norm / fro_norm_new)
-
-    acc_bf16_view_u16.copy_((acc_m_u32 >> 16).to(torch.uint16))
-    mantissa.copy_(acc_m_u32.to(torch.uint16))
-
-class Muon(torch.optim.Optimizer):
-    """
-    Muon - MomentUm Orthogonalized by Newton-schulz
-
-    https://kellerjordan.github.io/posts/muon/
-
-    Muon internally runs standard SGD-momentum, and then performs an orthogonalization post-
-    processing step, in which each 2D parameter's update is replaced with the nearest orthogonal
-    matrix. To efficiently orthogonalize each update, we use a Newton-Schulz iteration, which has
-    the advantage that it can be stably run in bfloat16 on the GPU.
-
-    Warning: This optimizer should not be used for the embedding layer, the final fully connected layer,
-    or any {0,1}-D parameters; those should all be optimized by a standard method (e.g., AdamW).
-    """
-    def __init__(self, params, lr=0.02, weight_decay=0.01, momentum=0.95, rank=0, world_size=1):
-        self.rank = rank
-        self.world_size = world_size
-        defaults = dict(lr=lr, weight_decay=weight_decay, momentum=momentum)
-        super().__init__(params, defaults)
-        assert all(p.dtype == torch.bfloat16 for group in self.param_groups for p in group["params"])
-
-    @torch.no_grad()
-    def step(self):
-        futures: list[torch.Future] = []
-        for group in self.param_groups:
-            params: list[Tensor] = group["params"]
-            params_pad = params + [torch.empty_like(params[-1])] * self.world_size
-            momentum = torch._as_tensor_fullprec(group["momentum"])
-            for base_i in range(len(params))[::self.world_size]:
-                if base_i + self.rank < len(params):
-                    p = params[base_i + self.rank]
-                    state = self.state[p]
-                    if len(state) == 0:
-                        state["mantissa"] = torch.zeros_like(p, dtype=torch.uint16)
-                        state["momentum_buffer"] = torch.zeros_like(p, dtype=torch.float32)
-                    update(
-                        p.view(torch.uint16), state["mantissa"], state["momentum_buffer"],
-                        p.grad, momentum,
-                        eff_lr=torch._as_tensor_fullprec(group["lr"] * max(1, p.size(-2) / p.size(-1)) ** 0.5),
-                        eff_weight_decay=torch._as_tensor_fullprec(group["lr"] * group["weight_decay"] * getattr(p, "wd_mul", 1.0)),
-                    )
-                futures.append(dist.all_gather(params_pad[base_i:base_i + self.world_size], params_pad[base_i + self.rank], async_op=True).get_future())
-        torch.futures.collect_all(futures).wait()
+# torch._dynamo.config.compiled_autograd = True
 
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the model
@@ -126,8 +30,16 @@ def norm(x: Tensor):
     return F.rms_norm(x, (x.size(-1),))
 
 @torch.no_grad()
-def init_linear(w: Tensor):
-    std = 0.5 * (w.size(-1) ** -0.5) # 0.5 is a bit better than the default 1/sqrt(3)
+def init_linear_large(w: Tensor):
+    std = 4.5 * (w.size(-1) ** -0.5) # re-normed
+    bound = (3 ** 0.5) * std
+    return w.uniform_(-bound, bound)
+
+init_linear = init_linear_large # default to large init
+
+@torch.no_grad()
+def init_linear_small(w: Tensor):
+    std = 0.05 * (w.size(-1) ** -0.5) # 0.05 is a bit better than the default 1/sqrt(3) for lm_head_w
     bound = (3 ** 0.5) * std
     return w.uniform_(-bound, bound)
 
@@ -159,7 +71,7 @@ class CausalSelfAttention(nn.Module):
         # merged QKV weights: suggested by many, implemented by @fernbear.bsky.social, and further improved by @YouJiacheng
         # https://x.com/hi_tysam/status/1879699187107033311
         self.qkvo_w = nn.Parameter(init_linear(torch.empty(4, hdim, dim)).bfloat16())
-        # self.qkvo_w.detach()[3].zero_() # out zero init suggested by @Grad62304977 - DISABLED: using normal init
+        # self.qkvo_w.detach()[3].zero_() # out zero init suggested by @Grad62304977
         self.rotary = Rotary(head_dim, max_seq_len)
         # scale the attention logits by given constant, instead of the default head_dim**-0.5, by @leloykun
         # inspired by learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
@@ -181,14 +93,15 @@ class CausalSelfAttention(nn.Module):
         y = F.linear(y, self.qkvo_w[3])
         return y
 
+
 class MLP(nn.Module):
     def __init__(self, dim: int):
         super().__init__()
         hdim = 4 * dim
         self.fc_w = nn.Parameter(init_linear(torch.empty(hdim, dim)).bfloat16())
-        self.proj_w = nn.Parameter(init_linear(torch.empty(dim, hdim)).bfloat16())  # Changed from zeros to init_linear
-        self.fc_w.wd_mul = 2.0
-        self.proj_w.wd_mul = 2.0
+        self.proj_w = nn.Parameter(init_linear(torch.empty(dim, hdim)).bfloat16())
+        self.fc_w.wd_mul = args.wd_mul
+        self.proj_w.wd_mul = args.wd_mul
 
     def forward(self, x: Tensor):
         x = F.linear(x, self.fc_w)
@@ -226,7 +139,7 @@ class GPT(nn.Module):
         self.blocks = nn.ModuleList([Block(model_dim, num_heads, max_seq_len, i) for i in range(num_layers)])
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
         # suggested to me by @Grad62304977. this originates from Karpathy's experiments.
-        self.lm_head_w = nn.Parameter(init_linear(torch.empty(next_multiple_of_n(vocab_size, n=128), model_dim)))  # Changed from zeros to init_linear
+        self.lm_head_w = nn.Parameter(init_linear_small(torch.empty(next_multiple_of_n(vocab_size, n=128), model_dim)))
         # Add learnable skip connection weights for decoder layers
         assert num_layers % 2 == 0
         self.scalars = nn.Parameter(torch.cat([
@@ -359,13 +272,28 @@ class Hyperparameters:
     val_seq_len = 4*64*1024 # FlexAttention sequence length for validation
     # optimization
     num_iterations = 5960 # number of iterations to run
-    cooldown_frac = 0.6 # fraction of training spent cooling down the learning rate
+    cooldown_frac = 0.7 # fraction of training spent cooling down the learning rate
     # architecture
     vocab_size = 50257
     # evaluation and logging
     val_loss_every = 125 # every how many steps to evaluate val loss? 0 for only at the end
     save_checkpoint = False
+    warmup_steps = 100
+    soaph_lr = 0.025
+    wd_mul = 2.0
 args = Hyperparameters()
+
+# Override from command line arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('--soaph_lr', type=float, default=args.soaph_lr)
+parser.add_argument('--wd_mul', type=float, default=args.wd_mul)
+parser.add_argument('--warmup_steps', type=int, default=args.warmup_steps)
+parser.add_argument('--gemma_lr', type=float, default=0.015)
+cmd_args = parser.parse_args()
+args.soaph_lr = cmd_args.soaph_lr
+args.wd_mul = cmd_args.wd_mul
+args.warmup_steps = cmd_args.warmup_steps
+args.gemma_lr = cmd_args.gemma_lr
 
 run_id = int(os.environ.get("RUN_ID", 0))
 # torchrun sets these env variables
@@ -384,6 +312,7 @@ if master_process:
     run_id_full = f"{run_id:03d}_{uuid.uuid4()}"
     os.makedirs("logs", exist_ok=True)
     logfile = f"logs/{run_id_full}.txt"
+    norm_logfile = f"logs/{run_id_full}_norm_log.jsonl"
     print(logfile)
 def print0(s, console=False):
     if master_process:
@@ -452,7 +381,7 @@ adam_param_groups = [dict(params=head_params, lr=1/320), dict(params=embed_param
 # small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
 # discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
 optimizer1 = torch.optim.AdamW(adam_param_groups, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.0, fused=True)
-optimizer2 = Muon(hidden_matrix_params, lr=0.01, momentum=0.95, rank=rank, world_size=world_size)
+optimizer2 = SOAPH(hidden_matrix_params, lr=args.soaph_lr, betas=(0.95, 0.95))
 optimizers: list[torch.optim.Optimizer] = [optimizer1, optimizer2]
 def opt_params(opt: torch.optim.Optimizer) -> list[nn.Parameter]:
     return [p for group in opt.param_groups for p in group["params"]]
@@ -461,8 +390,52 @@ for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
 
+# Initialize norm log with metadata
+if master_process:
+    metadata = {
+        "type": "metadata",
+        "run_id": run_id_full,
+        "hyperparameters": {
+            "num_iterations": args.num_iterations,
+            "train_seq_len": args.train_seq_len,
+            "val_seq_len": args.val_seq_len,
+            "val_tokens": args.val_tokens,
+            "cooldown_frac": args.cooldown_frac,
+            "vocab_size": args.vocab_size,
+            "val_loss_every": args.val_loss_every,
+            "warmup_steps": args.warmup_steps,
+        },
+        "model": {
+            "num_layers": 16,
+            "num_heads": 8,
+            "model_dim": 1024,
+        },
+        "optimizers": {
+            "AdamW": {
+                "betas": [0.8, 0.95],
+                "eps": 1e-10,
+                "weight_decay": 0.0,
+                "param_groups": {
+                    "head": {"lr": 1/320},
+                    "embed": {"lr": 0.3},
+                    "scalar": {"lr": 0.015},
+                }
+            },
+            "SOAPH": {
+                "lr": args.soaph_lr,
+                "betas": [0.95, 0.95],
+            }
+        },
+        "world_size": world_size,
+    }
+    # Write metadata as the first line of JSONL file
+    with open(norm_logfile, "w") as f:
+        f.write(json.dumps(metadata) + "\n")
+
 # learning rate schedule: stable then decay
 def get_lr(step: int):
+    if step < args.warmup_steps:
+        return (step + 1) / args.warmup_steps
     x = step / args.num_iterations # progress in training
     assert 0 <= x < 1
     if x < 1 - args.cooldown_frac:
@@ -479,7 +452,8 @@ def get_window_size_blocks(step: int):
     assert 0 <= x <= 1
     # Linearly increase the block-wise sliding window size over training 128 -> 1792
     # increase by @fernbear.bsky.social; block-wise by @YouJiacheng
-    window_size = next_multiple_of_n(1728 * x, n=128)
+    factor = 4 * x ** 3 - 6 * x ** 2 + 3 * x
+    window_size = next_multiple_of_n(3456 * factor, n=128)
     return get_window_size_blocks_helper(window_size)
 
 model: nn.Module = torch.compile(model, dynamic=False)
@@ -563,40 +537,44 @@ for step in range(train_steps + 1):
     for opt in optimizers:
         for group in opt.param_groups:
             group["lr"] = group["initial_lr"] * get_lr(step)
-    for group in optimizer2.param_groups:
-        frac = min(step / 300, 1) # momentum warmup for muon
-        group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
     # step the optimizers
     for opt in optimizers:
         torch.futures.collect_all(opt2futures[opt]).wait()
+        # Gradient clipping
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
     # null the gradients
     model.zero_grad(set_to_none=True)
     # logging
     approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
 
-    # Log parameter norms per layer and parameter type
+    # Log parameter norms to JSON
     if master_process:
-        param_norms = []
+        param_norms = {
+            "step": step + 1,
+            "train_loss": train_loss.item(),
+        }
         # Log embedding parameters
-        param_norms.append(f"embed_w:{model.embed.weight.norm().item():.6f}")
+        param_norms["embed_w"] = model.embed.weight.norm().item()
         for i, ve in enumerate(model.value_embeds):
-            param_norms.append(f"value_embed{i}_w:{ve.weight.norm().item():.6f}")
+            param_norms[f"value_embed{i}_w"] = ve.weight.norm().item()
         # Log lm_head
-        param_norms.append(f"lm_head_w:{model.lm_head_w.norm().item():.6f}")
+        param_norms["lm_head_w"] = model.lm_head_w.norm().item()
         # Log scalars
-        param_norms.append(f"scalars:{model.scalars.norm().item():.6f}")
+        param_norms["scalars"] = model.scalars.norm().item()
         # Log block parameters
         for i, block in enumerate(model.blocks):
             if block.attn is not None:
                 for j, name in enumerate(['q', 'k', 'v', 'o']):
-                    param_norms.append(f"block{i}_attn_{name}_w:{block.attn.qkvo_w[j].norm().item():.6f}")
-            param_norms.append(f"block{i}_mlp_fc_w:{block.mlp.fc_w.norm().item():.6f}")
-            param_norms.append(f"block{i}_mlp_proj_w:{block.mlp.proj_w.norm().item():.6f}")
-        norm_str = " ".join(param_norms)
-        print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms {norm_str}", console=True)
-    else:
-        print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
+                    param_norms[f"block{i}_attn_{name}_w"] = block.attn.qkvo_w[j].norm().item()
+            param_norms[f"block{i}_mlp_fc_w"] = block.mlp.fc_w.norm().item()
+            param_norms[f"block{i}_mlp_proj_w"] = block.mlp.proj_w.norm().item()
+
+        # Append to jsonlines file (one JSON object per line)
+        with open(norm_logfile, "a") as f:
+            f.write(json.dumps(param_norms) + "\n")
+
+    print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
 
 print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
     f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB", console=True)

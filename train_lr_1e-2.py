@@ -5,6 +5,7 @@ with open(sys.argv[0]) as f:
 import uuid
 import time
 import copy
+import json
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -22,6 +23,10 @@ from torch.nn.attention.flex_attention import BlockMask, flex_attention
 torch._dynamo.config.compiled_autograd = False  # TEMPORARILY DISABLED: Testing compatibility with flex_attention
 # -----------------------------------------------------------------------------
 # Muon optimizer
+
+
+def norm(x: Tensor):
+    return F.rms_norm(x, (x.size(-1),))
 
 def zeropower_via_newtonschulz5(G: Tensor) -> Tensor:
     """
@@ -69,6 +74,7 @@ def update(acc_bf16_view_u16: Tensor, mantissa: Tensor, momentum_buffer: Tensor,
     fro_norm = acc_m_u32.view(torch.float32).norm(p='fro', dim=norm_dims, keepdim=True)
     v_norm = v.norm(p='fro', dim=norm_dims, keepdim=True)
     acc_m_u32.view(torch.float32).add_(other=v, alpha=-eff_lr * fro_norm / v_norm)
+    # acc_m_u32.view(torch.float32).add_(other=v, alpha=-eff_lr)
     fro_norm_new = acc_m_u32.view(torch.float32).norm(p='fro', dim=norm_dims, keepdim=True)
     acc_m_u32.view(torch.float32).mul_(fro_norm / fro_norm_new)
 
@@ -113,7 +119,8 @@ class Muon(torch.optim.Optimizer):
                     update(
                         p.view(torch.uint16), state["mantissa"], state["momentum_buffer"],
                         p.grad, momentum,
-                        eff_lr=torch._as_tensor_fullprec(group["lr"] * max(1, p.size(-2) / p.size(-1)) ** 0.5),
+                        # eff_lr=torch._as_tensor_fullprec(group["lr"] * max(1, p.size(-2) / p.size(-1)) ** 0.5),
+                        eff_lr=torch._as_tensor_fullprec(group["lr"]),
                         eff_weight_decay=torch._as_tensor_fullprec(group["lr"] * group["weight_decay"] * getattr(p, "wd_mul", 1.0)),
                     )
                 futures.append(dist.all_gather(params_pad[base_i:base_i + self.world_size], params_pad[base_i + self.rank], async_op=True).get_future())
@@ -122,8 +129,17 @@ class Muon(torch.optim.Optimizer):
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the model
 
-def norm(x: Tensor):
-    return F.rms_norm(x, (x.size(-1),))
+class RMSNorm(nn.Module):
+    """RMSNorm with learnable scale parameter (like Gemma)."""
+    def __init__(self, dim: int):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(dim, dtype=torch.bfloat16))
+
+    def forward(self, x: Tensor):
+        # RMS normalization
+        normed = F.rms_norm(x, (x.size(-1),))
+        # Apply learnable scale (elementwise multiplication)
+        return normed * self.scale
 
 @torch.no_grad()
 def init_linear(w: Tensor):
@@ -164,14 +180,19 @@ class CausalSelfAttention(nn.Module):
         # scale the attention logits by given constant, instead of the default head_dim**-0.5, by @leloykun
         # inspired by learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
         self.attn_scale = 0.12
+        # RMSNorm with learnable scale for Q, K, V
+        # self.q_norm = RMSNorm(head_dim)
+        # self.k_norm = RMSNorm(head_dim)
+        self.v_norm = RMSNorm(head_dim)
 
     def forward(self, x: Tensor, ve: Tensor | None, block_mask: BlockMask, lambdas: Tensor):
         B, T = x.size(0), x.size(1) # batch size, sequence length
         assert B == 1, "Must use batch size = 1 for FlexAttention"
         q, k, v = F.linear(x, self.qkvo_w[:3].flatten(end_dim=1)).view(B, T, 3 * self.num_heads, self.head_dim).chunk(3, dim=-2)
-        q, k = norm(q), norm(k) # QK norm @Grad62304977
+        # q, k = self.q_norm(q), self.k_norm(k) # QK norm @Grad62304977
+        q, k = norm(q), norm(k)
         q, k = self.rotary(q), self.rotary(k)
-        v = norm(v)
+        v = self.v_norm(v)
         if ve is not None:
             v = lambdas[0] * v + lambdas[1] * ve.view_as(v) # @KoszarskyB & @Grad62304977
         else: # skip mid-layers token value embeddings by @YouJiacheng
@@ -202,12 +223,13 @@ class Block(nn.Module):
         # skip attention of blocks.7 (the 8th layer) by @YouJiacheng
         self.attn = CausalSelfAttention(dim, num_heads, max_seq_len) if layer_idx != 7 else None
         self.mlp = MLP(dim)
+        self.mlp_norm = RMSNorm(dim)
 
     def forward(self, x: Tensor, ve: Tensor | None, x0: Tensor, block_mask: BlockMask, lambdas: Tensor, sa_lambdas: Tensor):
         x = lambdas[0] * x + lambdas[1] * x0
         if self.attn is not None:
             x = x + self.attn(x, ve, block_mask, sa_lambdas)
-        x = x + self.mlp(norm(x))
+        x = x + self.mlp(self.mlp_norm(x))
         return x
 
 # -----------------------------------------------------------------------------
@@ -227,6 +249,8 @@ class GPT(nn.Module):
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
         # suggested to me by @Grad62304977. this originates from Karpathy's experiments.
         self.lm_head_w = nn.Parameter(init_linear(torch.empty(next_multiple_of_n(vocab_size, n=128), model_dim)))  # Changed from zeros to init_linear
+        # self.lm_head_w = nn.Parameter(torch.zeros(next_multiple_of_n(vocab_size, n=128), model_dim))
+        # zero init suggested by @Grad62304977
         # Add learnable skip connection weights for decoder layers
         assert num_layers % 2 == 0
         self.scalars = nn.Parameter(torch.cat([
@@ -234,6 +258,9 @@ class GPT(nn.Module):
             *[torch.tensor([1.0, 0.0]) for _ in range(num_layers)], # block lambdas
             *[torch.tensor([0.5, 0.5]) for _ in range(num_layers)], # SA lambdas
         ]))
+        # RMSNorm for embedding and final output
+        self.embed_norm = RMSNorm(model_dim)
+        self.final_norm = RMSNorm(model_dim)
 
     def create_blockmasks(self, input_seq: Tensor, sliding_window_num_blocks: Tensor):
         BLOCK_SIZE = 128
@@ -287,7 +314,7 @@ class GPT(nn.Module):
         block_masks = [long_bm, short_bm, short_bm, short_bm, long_bm, short_bm, short_bm, short_bm, short_bm, short_bm, short_bm, long_bm, short_bm, short_bm, short_bm, long_bm]
         assert len(block_masks) == len(self.blocks)
 
-        x = x0 = norm(self.embed(input_seq)[None]) # use of norm here by @Grad62304977
+        x = x0 = self.embed_norm(self.embed(input_seq)[None]) # use of norm here by @Grad62304977
 
         skip_connections = []
         skip_map = {
@@ -304,7 +331,7 @@ class GPT(nn.Module):
             x = self.blocks[i](x, ve[i], x0, block_masks[i], lambdas[i], sa_lambdas[i])
             skip_connections.append(x)
 
-        x = norm(x)
+        x = self.final_norm(x)
         if self.training:
             logits: Tensor = F.linear(x.flatten(end_dim=1), self.lm_head_w.bfloat16()).float()
             loss = F.cross_entropy(15 * logits * torch.rsqrt(logits.square() + 225), target_seq)
@@ -360,11 +387,13 @@ class Hyperparameters:
     # optimization
     num_iterations = 5960 # number of iterations to run
     cooldown_frac = 0.6 # fraction of training spent cooling down the learning rate
+    initial_cooldown_frac = 0.1
     # architecture
     vocab_size = 50257
     # evaluation and logging
     val_loss_every = 125 # every how many steps to evaluate val loss? 0 for only at the end
     save_checkpoint = False
+    save_checkpoint_step = -1 # save checkpoint at this step (-1 to disable)
 args = Hyperparameters()
 
 run_id = int(os.environ.get("RUN_ID", 0))
@@ -384,6 +413,7 @@ if master_process:
     run_id_full = f"{run_id:03d}_{uuid.uuid4()}"
     os.makedirs("logs", exist_ok=True)
     logfile = f"logs/{run_id_full}.txt"
+    norm_logfile = f"logs/{run_id_full}_norm_log.jsonl"
     print(logfile)
 def print0(s, console=False):
     if master_process:
@@ -431,7 +461,7 @@ print0("="*100)
 model: nn.Module = GPT(vocab_size=args.vocab_size, num_layers=16, num_heads=8, model_dim=1024,
                        max_seq_len=max(args.train_seq_len, args.val_seq_len)).cuda()
 for m in model.modules():
-    if isinstance(m, nn.Embedding):
+    if isinstance(m, nn.Embedding) or isinstance(m, RMSNorm):
         m.bfloat16()
 for param in model.parameters():
     dist.broadcast(param.detach(), 0)
@@ -441,14 +471,20 @@ hidden_matrix_params = sorted((p for p in model.blocks.parameters() if p.ndim >=
 embed_params = [*model.embed.parameters(), *model.value_embeds.parameters()]
 scalar_params = [model.scalars]
 head_params: list[nn.Parameter] = [model.lm_head_w]
+# Collect all RMSNorm parameters (gemma scale parameters)
+norm_params = []
+for m in model.modules():
+    if isinstance(m, RMSNorm):
+        norm_params.extend(m.parameters())
 # sanity check
-params_collections = [hidden_matrix_params, embed_params, scalar_params, head_params]
+params_collections = [hidden_matrix_params, embed_params, scalar_params, head_params, norm_params]
 optimized_parameters_set = {p for params in params_collections for p in params}
 assert optimized_parameters_set == {*model.parameters()}
 assert len(optimized_parameters_set) == sum(len(lst) for lst in params_collections)
 
 # init the optimizer(s)
-adam_param_groups = [dict(params=head_params, lr=1/320), dict(params=embed_params, lr=0.3), dict(params=scalar_params, lr=0.015)]
+# norm_params use the same config as scalar_params (lr=0.015)
+adam_param_groups = [dict(params=head_params, lr=1/320), dict(params=embed_params, lr=0.3), dict(params=scalar_params, lr=0.015), dict(params=norm_params, lr=0.015)]
 # small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
 # discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
 optimizer1 = torch.optim.AdamW(adam_param_groups, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.0, fused=True)
@@ -461,11 +497,56 @@ for opt in optimizers:
     for group in opt.param_groups:
         group["initial_lr"] = group["lr"]
 
+# Initialize norm log with metadata
+if master_process:
+    metadata = {
+        "type": "metadata",
+        "run_id": run_id_full,
+        "hyperparameters": {
+            "num_iterations": args.num_iterations,
+            "train_seq_len": args.train_seq_len,
+            "val_seq_len": args.val_seq_len,
+            "val_tokens": args.val_tokens,
+            "cooldown_frac": args.cooldown_frac,
+            "initial_cooldown_frac": args.initial_cooldown_frac,
+            "vocab_size": args.vocab_size,
+            "val_loss_every": args.val_loss_every,
+        },
+        "model": {
+            "num_layers": 16,
+            "num_heads": 8,
+            "model_dim": 1024,
+        },
+        "optimizers": {
+            "AdamW": {
+                "betas": [0.8, 0.95],
+                "eps": 1e-10,
+                "weight_decay": 0.0,
+                "param_groups": {
+                    "head": {"lr": 1/320},
+                    "embed": {"lr": 0.3},
+                    "scalar": {"lr": 0.015},
+                    "norm": {"lr": 0.015},
+                }
+            },
+            "Muon": {
+                "lr": 0.01,
+                "momentum": 0.95,
+            }
+        },
+        "world_size": world_size,
+    }
+    # Write metadata as the first line of JSONL file
+    with open(norm_logfile, "w") as f:
+        f.write(json.dumps(metadata) + "\n")
+
 # learning rate schedule: stable then decay
 def get_lr(step: int):
     x = step / args.num_iterations # progress in training
     assert 0 <= x < 1
-    if x < 1 - args.cooldown_frac:
+    if x < args.initial_cooldown_frac:
+        return (args.initial_cooldown_frac - x) / args.initial_cooldown_frac * 4.0 + 1.0
+    elif x < 1 - args.cooldown_frac:
         return 1.0
     else:
         return (1 - x) / args.cooldown_frac
@@ -572,31 +653,49 @@ for step in range(train_steps + 1):
         opt.step()
     # null the gradients
     model.zero_grad(set_to_none=True)
+    # checkpoint saving
+    if args.save_checkpoint_step != -1 and step + 1 == args.save_checkpoint_step:
+        if master_process:
+            log = dict(step=step+1, code=code, model=model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
+            os.makedirs(f"logs/{run_id_full}", exist_ok=True)
+            torch.save(log, f"logs/{run_id_full}/state_step{step+1:06d}.pt")
+            print0(f"Saved checkpoint at step {step+1}", console=True)
     # logging
     approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
 
-    # Log parameter norms per layer and parameter type
+    # Log parameter norms to JSON
     if master_process:
-        param_norms = []
+        param_norms = {
+            "step": step + 1,
+            "train_loss": train_loss.item(),
+        }
         # Log embedding parameters
-        param_norms.append(f"embed_w:{model.embed.weight.norm().item():.6f}")
+        param_norms["embed_w"] = model.embed.weight.norm().item()
         for i, ve in enumerate(model.value_embeds):
-            param_norms.append(f"value_embed{i}_w:{ve.weight.norm().item():.6f}")
+            param_norms[f"value_embed{i}_w"] = ve.weight.norm().item()
         # Log lm_head
-        param_norms.append(f"lm_head_w:{model.lm_head_w.norm().item():.6f}")
+        param_norms["lm_head_w"] = model.lm_head_w.norm().item()
         # Log scalars
-        param_norms.append(f"scalars:{model.scalars.norm().item():.6f}")
+        param_norms["scalars"] = model.scalars.norm().item()
         # Log block parameters
         for i, block in enumerate(model.blocks):
             if block.attn is not None:
                 for j, name in enumerate(['q', 'k', 'v', 'o']):
-                    param_norms.append(f"block{i}_attn_{name}_w:{block.attn.qkvo_w[j].norm().item():.6f}")
-            param_norms.append(f"block{i}_mlp_fc_w:{block.mlp.fc_w.norm().item():.6f}")
-            param_norms.append(f"block{i}_mlp_proj_w:{block.mlp.proj_w.norm().item():.6f}")
-        norm_str = " ".join(param_norms)
-        print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms {norm_str}", console=True)
-    else:
-        print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
+                    param_norms[f"block{i}_attn_{name}_w"] = block.attn.qkvo_w[j].norm().item()
+            param_norms[f"block{i}_mlp_fc_w"] = block.mlp.fc_w.norm().item()
+            param_norms[f"block{i}_mlp_proj_w"] = block.mlp.proj_w.norm().item()
+        # Log RMSNorm scale parameters
+        rmsnorm_idx = 0
+        for m in model.modules():
+            if isinstance(m, RMSNorm):
+                param_norms[f"rmsnorm{rmsnorm_idx}_scale"] = m.scale.norm().item()
+                rmsnorm_idx += 1
+
+        # Append to jsonlines file (one JSON object per line)
+        with open(norm_logfile, "a") as f:
+            f.write(json.dumps(param_norms) + "\n")
+
+    print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
 
 print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
     f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB", console=True)

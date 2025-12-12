@@ -5,6 +5,7 @@ with open(sys.argv[0]) as f:
 import uuid
 import time
 import copy
+import argparse
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -16,12 +17,49 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 import torch.distributed as dist
 # use of FlexAttention contributed by @KoszarskyB
+import numpy as np
 from torch.nn.attention.flex_attention import BlockMask, flex_attention
 # torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
 
 torch._dynamo.config.compiled_autograd = False  # TEMPORARILY DISABLED: Testing compatibility with flex_attention
 # -----------------------------------------------------------------------------
 # Muon optimizer
+
+
+@dataclass
+class Hyperparameters:
+    # data
+    train_files = "data/fineweb10B/fineweb_train_*.bin" # input .bin to train on
+    val_files = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
+    val_tokens = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
+    train_seq_len = 64*1024 # FlexAttention sequence length
+    val_seq_len = 4*64*1024 # FlexAttention sequence length for validation
+    # optimization
+    num_iterations = 5960 # number of iterations to run
+    cooldown_frac = 0.6 # fraction of training spent cooling down the learning rate
+    cooldown_frac_adamw = 0.7 # fraction of training spent cooling down the learning rate for AdamW
+    lr_scheduling = "linear" # learning rate scheduling: "linear" or "cosine"
+    # architecture
+    vocab_size = 50257
+    muon_lr = 0.01
+    wd_mul = 2.0
+    # evaluation and logging
+    val_loss_every = 125 # every how many steps to evaluate val loss? 0 for only at the end
+    save_checkpoint = False
+    save_checkpoint_step = -1 # save checkpoint at this step (-1 to disable)
+args = Hyperparameters()
+
+# Override from command line arguments
+parser = argparse.ArgumentParser()
+parser.add_argument('--muon_lr', type=float, default=args.muon_lr)
+parser.add_argument('--cooldown_frac', type=float, default=args.cooldown_frac)
+parser.add_argument('--cooldown_frac_adamw', type=float, default=args.cooldown_frac_adamw)
+parser.add_argument('--lr_scheduling', type=str, default=args.lr_scheduling, choices=["linear", "cosine"])
+parser.add_argument('--wd_mul', type=float, default=args.wd_mul)
+cmd_args = parser.parse_args()
+
+def norm(x: Tensor):
+    return F.rms_norm(x, (x.size(-1),))
 
 def zeropower_via_newtonschulz5(G: Tensor) -> Tensor:
     """
@@ -57,11 +95,12 @@ def zeropower_via_newtonschulz5(G: Tensor) -> Tensor:
     return X
     
 @torch.compile
-def update(acc_bf16_view_u16: Tensor, mantissa: Tensor, momentum_buffer: Tensor, grad: Tensor, momentum: Tensor, eff_lr: Tensor, eff_weight_decay: Tensor):
+def update(acc_bf16_view_u16: Tensor, mantissa: Tensor, momentum_buffer: Tensor, velocity_buffer: Tensor, grad: Tensor, momentum: Tensor, eff_lr: Tensor, eff_weight_decay: Tensor):
     assert acc_bf16_view_u16.dtype == mantissa.dtype == torch.uint16
     grad = grad.float()
     momentum_buffer.copy_(momentum * momentum_buffer + (1 - momentum) * grad)
-    v = zeropower_via_newtonschulz5(momentum * momentum_buffer + (1 - momentum) * grad)
+    velocity_buffer.copy_(momentum * velocity_buffer + (1 - momentum) * grad * grad)
+    v = zeropower_via_newtonschulz5((momentum * momentum_buffer + (1 - momentum) * grad) / (torch.sqrt(velocity_buffer) + 1e-10))
     acc_m_u32 = (acc_bf16_view_u16.to(torch.uint32) << 16) | mantissa.to(torch.uint32)
     # acc_m_u32.view(torch.float32).add_(other=v, alpha=-eff_lr)
     # For batched parameters (e.g., qkvo_w with shape [4, hdim, dim]), compute norm over last 2 dims
@@ -69,6 +108,7 @@ def update(acc_bf16_view_u16: Tensor, mantissa: Tensor, momentum_buffer: Tensor,
     fro_norm = acc_m_u32.view(torch.float32).norm(p='fro', dim=norm_dims, keepdim=True)
     v_norm = v.norm(p='fro', dim=norm_dims, keepdim=True)
     acc_m_u32.view(torch.float32).add_(other=v, alpha=-eff_lr * fro_norm / v_norm)
+    # acc_m_u32.view(torch.float32).add_(other=v, alpha=-eff_lr)
     fro_norm_new = acc_m_u32.view(torch.float32).norm(p='fro', dim=norm_dims, keepdim=True)
     acc_m_u32.view(torch.float32).mul_(fro_norm / fro_norm_new)
 
@@ -110,10 +150,12 @@ class Muon(torch.optim.Optimizer):
                     if len(state) == 0:
                         state["mantissa"] = torch.zeros_like(p, dtype=torch.uint16)
                         state["momentum_buffer"] = torch.zeros_like(p, dtype=torch.float32)
+                        state["velocity_buffer"] = torch.zeros_like(p, dtype=torch.float32)
                     update(
-                        p.view(torch.uint16), state["mantissa"], state["momentum_buffer"],
+                        p.view(torch.uint16), state["mantissa"], state["momentum_buffer"], state["velocity_buffer"],
                         p.grad, momentum,
-                        eff_lr=torch._as_tensor_fullprec(group["lr"] * max(1, p.size(-2) / p.size(-1)) ** 0.5),
+                        # eff_lr=torch._as_tensor_fullprec(group["lr"] * max(1, p.size(-2) / p.size(-1)) ** 0.5),
+                        eff_lr=torch._as_tensor_fullprec(group["lr"]) * np.sqrt(getattr(p, "wd_mul", 1.0)),
                         eff_weight_decay=torch._as_tensor_fullprec(group["lr"] * group["weight_decay"] * getattr(p, "wd_mul", 1.0)),
                     )
                 futures.append(dist.all_gather(params_pad[base_i:base_i + self.world_size], params_pad[base_i + self.rank], async_op=True).get_future())
@@ -122,12 +164,33 @@ class Muon(torch.optim.Optimizer):
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the model
 
+class RMSNorm(nn.Module):
+    """RMSNorm with learnable scale parameter (like Gemma)."""
+    def __init__(self, dim: int):
+        super().__init__()
+        self.scale = nn.Parameter(torch.ones(dim, dtype=torch.float32))
+
+    def forward(self, x: Tensor):
+        # RMS normalization
+        dtype = x.dtype
+        normed = F.rms_norm(x, (x.size(-1),)).float()
+        # Apply learnable scale (elementwise multiplication)
+        return (normed * self.scale).to(dtype)
+
 def norm(x: Tensor):
     return F.rms_norm(x, (x.size(-1),))
 
 @torch.no_grad()
-def init_linear(w: Tensor):
-    std = 0.5 * (w.size(-1) ** -0.5) # 0.5 is a bit better than the default 1/sqrt(3)
+def init_linear_large(w: Tensor):
+    std = 4.5 * (w.size(-1) ** -0.5) # re-normed
+    bound = (3 ** 0.5) * std
+    return w.uniform_(-bound, bound)
+
+init_linear = init_linear_large # default to large init
+
+@torch.no_grad()
+def init_linear_small(w: Tensor):
+    std = 0.05 * (w.size(-1) ** -0.5) # 0.05 is a bit better than the default 1/sqrt(3) for lm_head_w
     bound = (3 ** 0.5) * std
     return w.uniform_(-bound, bound)
 
@@ -164,12 +227,17 @@ class CausalSelfAttention(nn.Module):
         # scale the attention logits by given constant, instead of the default head_dim**-0.5, by @leloykun
         # inspired by learnable scalars used by @brendanh0gan https://x.com/hi_tysam/status/1879693583898591283
         self.attn_scale = 0.12
+        # RMSNorm with learnable scale for Q, K, V
+        # self.q_norm = RMSNorm(head_dim)
+        # self.k_norm = RMSNorm(head_dim)
+        # self.v_norm = RMSNorm(head_dim)
 
     def forward(self, x: Tensor, ve: Tensor | None, block_mask: BlockMask, lambdas: Tensor):
         B, T = x.size(0), x.size(1) # batch size, sequence length
         assert B == 1, "Must use batch size = 1 for FlexAttention"
         q, k, v = F.linear(x, self.qkvo_w[:3].flatten(end_dim=1)).view(B, T, 3 * self.num_heads, self.head_dim).chunk(3, dim=-2)
-        q, k = norm(q), norm(k) # QK norm @Grad62304977
+        # q, k = self.q_norm(q), self.k_norm(k) # QK norm @Grad62304977
+        q, k = norm(q), norm(k)
         q, k = self.rotary(q), self.rotary(k)
         v = norm(v)
         if ve is not None:
@@ -187,8 +255,8 @@ class MLP(nn.Module):
         hdim = 4 * dim
         self.fc_w = nn.Parameter(init_linear(torch.empty(hdim, dim)).bfloat16())
         self.proj_w = nn.Parameter(init_linear(torch.empty(dim, hdim)).bfloat16())  # Changed from zeros to init_linear
-        self.fc_w.wd_mul = 2.0
-        self.proj_w.wd_mul = 2.0
+        self.fc_w.wd_mul = args.wd_mul
+        self.proj_w.wd_mul = args.wd_mul
 
     def forward(self, x: Tensor):
         x = F.linear(x, self.fc_w)
@@ -202,6 +270,7 @@ class Block(nn.Module):
         # skip attention of blocks.7 (the 8th layer) by @YouJiacheng
         self.attn = CausalSelfAttention(dim, num_heads, max_seq_len) if layer_idx != 7 else None
         self.mlp = MLP(dim)
+        # self.mlp_norm = RMSNorm(dim)
 
     def forward(self, x: Tensor, ve: Tensor | None, x0: Tensor, block_mask: BlockMask, lambdas: Tensor, sa_lambdas: Tensor):
         x = lambdas[0] * x + lambdas[1] * x0
@@ -226,7 +295,7 @@ class GPT(nn.Module):
         self.blocks = nn.ModuleList([Block(model_dim, num_heads, max_seq_len, i) for i in range(num_layers)])
         # there are only 50257 unique GPT-2 tokens; we extend to nearest multiple of 128 for efficiency.
         # suggested to me by @Grad62304977. this originates from Karpathy's experiments.
-        self.lm_head_w = nn.Parameter(init_linear(torch.empty(next_multiple_of_n(vocab_size, n=128), model_dim)))  # Changed from zeros to init_linear
+        self.lm_head_w = nn.Parameter(init_linear_small(torch.empty(next_multiple_of_n(vocab_size, n=128), model_dim)))  # Changed from zeros to init_linear
         # Add learnable skip connection weights for decoder layers
         assert num_layers % 2 == 0
         self.scalars = nn.Parameter(torch.cat([
@@ -234,6 +303,9 @@ class GPT(nn.Module):
             *[torch.tensor([1.0, 0.0]) for _ in range(num_layers)], # block lambdas
             *[torch.tensor([0.5, 0.5]) for _ in range(num_layers)], # SA lambdas
         ]))
+        # RMSNorm for embedding and final output
+        # self.embed_norm = RMSNorm(model_dim)
+        # self.final_norm = RMSNorm(model_dim)
 
     def create_blockmasks(self, input_seq: Tensor, sliding_window_num_blocks: Tensor):
         BLOCK_SIZE = 128
@@ -349,24 +421,11 @@ def distributed_data_generator(filename_pattern: str, batch_size: int, rank : in
 # -----------------------------------------------------------------------------
 # int main
 
-@dataclass
-class Hyperparameters:
-    # data
-    train_files = "data/fineweb10B/fineweb_train_*.bin" # input .bin to train on
-    val_files = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
-    val_tokens = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    train_seq_len = 64*1024 # FlexAttention sequence length
-    val_seq_len = 4*64*1024 # FlexAttention sequence length for validation
-    # optimization
-    num_iterations = 5960 # number of iterations to run
-    cooldown_frac = 0.6 # fraction of training spent cooling down the learning rate
-    # architecture
-    vocab_size = 50257
-    # evaluation and logging
-    val_loss_every = 125 # every how many steps to evaluate val loss? 0 for only at the end
-    save_checkpoint = False
-args = Hyperparameters()
-
+args.muon_lr = cmd_args.muon_lr
+args.cooldown_frac = cmd_args.cooldown_frac
+args.cooldown_frac_adamw = cmd_args.cooldown_frac_adamw
+args.lr_scheduling = cmd_args.lr_scheduling
+args.wd_mul = cmd_args.wd_mul
 run_id = int(os.environ.get("RUN_ID", 0))
 # torchrun sets these env variables
 rank = int(os.environ["RANK"])
@@ -448,11 +507,12 @@ assert optimized_parameters_set == {*model.parameters()}
 assert len(optimized_parameters_set) == sum(len(lst) for lst in params_collections)
 
 # init the optimizer(s)
+# norm_params use the same config as scalar_params (lr=0.015)
 adam_param_groups = [dict(params=head_params, lr=1/320), dict(params=embed_params, lr=0.3), dict(params=scalar_params, lr=0.015)]
 # small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
 # discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
 optimizer1 = torch.optim.AdamW(adam_param_groups, betas=(0.8, 0.95), eps=1e-10, weight_decay=0.0, fused=True)
-optimizer2 = Muon(hidden_matrix_params, lr=0.01, momentum=0.95, rank=rank, world_size=world_size)
+optimizer2 = Muon(hidden_matrix_params, lr=args.muon_lr, momentum=0.95, rank=rank, world_size=world_size)
 optimizers: list[torch.optim.Optimizer] = [optimizer1, optimizer2]
 def opt_params(opt: torch.optim.Optimizer) -> list[nn.Parameter]:
     return [p for group in opt.param_groups for p in group["params"]]
@@ -462,13 +522,40 @@ for opt in optimizers:
         group["initial_lr"] = group["lr"]
 
 # learning rate schedule: stable then decay
-def get_lr(step: int):
+def get_lr_linear(step: int):
     x = step / args.num_iterations # progress in training
     assert 0 <= x < 1
     if x < 1 - args.cooldown_frac:
         return 1.0
     else:
         return (1 - x) / args.cooldown_frac
+
+import numpy as np
+def get_lr_cosine(step: int):
+    x = step / args.num_iterations # progress in training
+    assert 0 <= x < 1
+    if x < 1 - args.cooldown_frac:
+        return 1.0
+    else:
+        # Cosine decay from 1 to 0 during cooldown phase
+        cooldown_progress = (x - (1 - args.cooldown_frac)) / args.cooldown_frac
+        return 0.5 * (1 + np.cos(np.pi * cooldown_progress))
+
+def get_lr_adamw(step: int):
+    x = step / args.num_iterations # progress in training
+    assert 0 <= x < 1
+    if x < 1 - args.cooldown_frac_adamw:
+        return 1.0
+    else:
+        return (1 - x) / args.cooldown_frac_adamw
+
+# Select learning rate schedule based on args.lr_scheduling
+if args.lr_scheduling == "linear":
+    get_lr = get_lr_linear
+elif args.lr_scheduling == "cosine":
+    get_lr = get_lr_cosine
+else:
+    raise ValueError(f"Unknown lr_scheduling: {args.lr_scheduling}. Must be 'linear' or 'cosine'")
 
 # attention window size schedule: linearly increase
 @lru_cache(1)
@@ -479,7 +566,8 @@ def get_window_size_blocks(step: int):
     assert 0 <= x <= 1
     # Linearly increase the block-wise sliding window size over training 128 -> 1792
     # increase by @fernbear.bsky.social; block-wise by @YouJiacheng
-    window_size = next_multiple_of_n(1728 * x, n=128)
+    factor = 4 * x ** 3 - 6 * x ** 2 + 3 * x
+    window_size = next_multiple_of_n(3456 * factor, n=128)
     return get_window_size_blocks_helper(window_size)
 
 model: nn.Module = torch.compile(model, dynamic=False)
@@ -562,7 +650,10 @@ for step in range(train_steps + 1):
     # set optimization hyperparameters
     for opt in optimizers:
         for group in opt.param_groups:
-            group["lr"] = group["initial_lr"] * get_lr(step)
+            if isinstance(opt, torch.optim.AdamW):
+                group["lr"] = group["initial_lr"] * get_lr_adamw(step)
+            else:
+                group["lr"] = group["initial_lr"] * get_lr(step)
     for group in optimizer2.param_groups:
         frac = min(step / 300, 1) # momentum warmup for muon
         group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
@@ -572,31 +663,16 @@ for step in range(train_steps + 1):
         opt.step()
     # null the gradients
     model.zero_grad(set_to_none=True)
+    # checkpoint saving
+    if args.save_checkpoint_step != -1 and step + 1 == args.save_checkpoint_step:
+        if master_process:
+            log = dict(step=step+1, code=code, model=model.state_dict(), optimizers=[opt.state_dict() for opt in optimizers])
+            os.makedirs(f"logs/{run_id_full}", exist_ok=True)
+            torch.save(log, f"logs/{run_id_full}/state_step{step+1:06d}.pt")
+            print0(f"Saved checkpoint at step {step+1}", console=True)
     # logging
     approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
-
-    # Log parameter norms per layer and parameter type
-    if master_process:
-        param_norms = []
-        # Log embedding parameters
-        param_norms.append(f"embed_w:{model.embed.weight.norm().item():.6f}")
-        for i, ve in enumerate(model.value_embeds):
-            param_norms.append(f"value_embed{i}_w:{ve.weight.norm().item():.6f}")
-        # Log lm_head
-        param_norms.append(f"lm_head_w:{model.lm_head_w.norm().item():.6f}")
-        # Log scalars
-        param_norms.append(f"scalars:{model.scalars.norm().item():.6f}")
-        # Log block parameters
-        for i, block in enumerate(model.blocks):
-            if block.attn is not None:
-                for j, name in enumerate(['q', 'k', 'v', 'o']):
-                    param_norms.append(f"block{i}_attn_{name}_w:{block.attn.qkvo_w[j].norm().item():.6f}")
-            param_norms.append(f"block{i}_mlp_fc_w:{block.mlp.fc_w.norm().item():.6f}")
-            param_norms.append(f"block{i}_mlp_proj_w:{block.mlp.proj_w.norm().item():.6f}")
-        norm_str = " ".join(param_norms)
-        print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms {norm_str}", console=True)
-    else:
-        print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
+    print0(f"step:{step+1}/{train_steps} train_loss:{train_loss.item():.4f} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
 
 print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
     f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB", console=True)
