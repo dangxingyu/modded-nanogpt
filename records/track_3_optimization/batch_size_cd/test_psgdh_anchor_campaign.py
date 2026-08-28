@@ -48,17 +48,23 @@ def test_anchor_cases_allow_cold_psgd_compile_to_finish():
         case["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] for case in cases
     } == {"900"}
     assert {
+        case["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] for case in cases
+    } == {"120"}
+    assert {
+        case["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] for case in cases
+    } == {"0"}
+    assert {
         case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] for case in cases
     } == {"0"}
     assert {
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] for case in cases
     } == {"0"}
     assert {case["env"]["TRACK3_EXPLICIT_GRADIENT_WORKS"] for case in cases} == {
-        "1"
+        "0"
     }
     assert {
         case["env"]["TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"] for case in cases
-    } == {"1"}
+    } == {"0"}
     assert {
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] for case in cases
     } == {"0"}

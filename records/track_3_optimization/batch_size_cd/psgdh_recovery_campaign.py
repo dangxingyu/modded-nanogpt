@@ -95,14 +95,15 @@ def unresolved_cases(
             case_stall_timeout_seconds
         )
         case["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "10800"
-        # PSGD uses explicit asynchronous work handles and stream dependency
-        # waits.  Device-wide fences can deadlock while a peer rank is still
-        # entering the matching collective.
+        # Preserve the blocking collective calls from PR #316.  Device-wide
+        # fences and async Work.wait() both changed the safe rank progression.
+        case["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] = "0"
-        case["env"]["TRACK3_EXPLICIT_GRADIENT_WORKS"] = "1"
-        case["env"]["TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"] = "1"
+        case["env"]["TRACK3_EXPLICIT_GRADIENT_WORKS"] = "0"
+        case["env"]["TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"] = "0"
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "0"
+        case["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] = "120"
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.
         cases.append(case)

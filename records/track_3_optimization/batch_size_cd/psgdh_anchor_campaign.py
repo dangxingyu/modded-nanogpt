@@ -195,16 +195,19 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "TRACK3_HARDWARE_FAMILY": "H20",
                 "TRACK3_DIST_TIMEOUT_MINUTES": "180",
                 "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "10800",
-                # Enqueue each phase explicitly and use Work.wait() to place
-                # stream dependencies.  Device-wide fences can deadlock when
-                # another rank is still entering the matching collective.
+                # Preserve the blocking collective calls from PR #316.  The
+                # generic device-wide fences deadlock under PSGD's unequal
+                # per-rank optimizer work, while async Work.wait() lets a
+                # lightly loaded rank enqueue collectives from a later phase.
+                "TRACK3_STRICT_COLLECTIVE_COMPLETION": "0",
                 "TRACK3_GRADIENT_COLLECTIVE_COMPLETION": "0",
                 "TRACK3_GRADIENT_PHASE_COMPLETION": "0",
-                "TRACK3_EXPLICIT_GRADIENT_WORKS": "1",
-                "TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION": "1",
+                "TRACK3_EXPLICIT_GRADIENT_WORKS": "0",
+                "TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION": "0",
                 "TRACK3_OPTIMIZER_STEP_COMPLETION": "0",
                 "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "10800",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
+                "TRACK3_CASE_COMPILE_GRACE_STEPS": "120",
                 "TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5",
                 "NPROC": str(batch.nproc),
             }
