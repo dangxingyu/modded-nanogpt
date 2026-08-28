@@ -195,6 +195,13 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "TRACK3_HARDWARE_FAMILY": "H20",
                 "TRACK3_DIST_TIMEOUT_MINUTES": "180",
                 "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "10800",
+                # PR #316 relies on normal CUDA stream ordering for its
+                # gradient collectives.  The generic Track-3 materializer can
+                # add a per-parameter device fence for older A100 optimizer
+                # jobs, but enabling it for PSGD caused reproducible split-rank
+                # deadlocks on H20 (one rank in all_reduce, peers in the
+                # following synchronize).  Keep PSGD on the exact PR semantics.
+                "TRACK3_STRICT_COLLECTIVE_COMPLETION": "0",
                 "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "10800",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
                 "TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5",
