@@ -363,6 +363,25 @@ TRACK3_FINAL_ABLATION_CASE_END worker=0 position=2 case_id=partial attempt=1 sta
     assert strict["good"]["host"] == "host-a"
 
 
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Watchdog caught collective operation timeout: WorkNCCL(SeqNum=1)",
+        "ProcessGroupNCCL's watchdog got stuck for 480 seconds",
+        (
+            "Terminating the process after attempting to dump debug info, due to "
+            "ProcessGroupNCCL watchdog hang."
+        ),
+    ],
+)
+def test_monitor_recognizes_nccl_watchdog_hangs(message: str) -> None:
+    assert monitor.has_collective_timeout(message) is True
+
+
+def test_monitor_keeps_non_nccl_failures_out_of_collective_bucket() -> None:
+    assert monitor.has_collective_timeout("ChildFailedError: exit code 1") is False
+
+
 def test_successful_case_cleans_orphaned_child_processes() -> None:
     started = time.monotonic()
     code = (
