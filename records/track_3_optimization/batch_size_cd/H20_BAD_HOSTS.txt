@@ -1212,3 +1212,7 @@ g340-cd51-7700-36f5-e567-b7fc-ff18
 # PSGD-H 2m r4 hedge trial 405605850: NCCL system error terminated a case.
 # Last error: pthread_join failed with no such process.
 g340-cd51-7700-3fb2-e72-2c1a-4c6b
+# PSGD-H 512k r3 fixed recovery trial 405587445: these hosts remained in
+# CPU-saturated Inductor compilation for more than one hour.
+g340-cd51-7700-dfbd-4bb-fa5d-8781
+g340-cd51-7700-e6bc-c50e-94b2-7773
