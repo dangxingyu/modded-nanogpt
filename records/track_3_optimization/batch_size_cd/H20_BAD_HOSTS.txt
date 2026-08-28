@@ -1221,3 +1221,7 @@ g340-cd51-7700-e6bc-c50e-94b2-7773
 g340-cd51-7700-2f4-fa24-c4d0-4e3e
 g340-cd51-7700-5557-ae78-119f-34a4
 g340-cd51-7700-d32e-8e0b-c3f6-ad02
+# PSGD-H 2m r4 tail trial 405621056: rank 0 remained in gradient all-reduce
+# while ranks 1-7 spun at the explicit CUDA completion fence; GPU 0 was idle
+# and GPUs 1-7 stayed at 100 percent utilization.
+2605:340:cd51:7700:2b7e:1f8e:945d:3f27
