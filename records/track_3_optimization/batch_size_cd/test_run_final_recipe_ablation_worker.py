@@ -538,6 +538,30 @@ def test_max_attempts_must_be_positive() -> None:
         )
 
 
+def test_packed_case_retry_contract_overrides_process_default() -> None:
+    assigned_queue = {
+        "cases": [
+            {"env": {"TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5"}},
+            {"env": {"TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5"}},
+        ]
+    }
+    assert worker.max_attempts_for_queue(
+        assigned_queue,
+        {"TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "3"},
+    ) == 5
+
+
+def test_packed_case_retry_contract_must_be_consistent() -> None:
+    assigned_queue = {
+        "cases": [
+            {"env": {"TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "3"}},
+            {"env": {"TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5"}},
+        ]
+    }
+    with pytest.raises(ValueError, match="inconsistent"):
+        worker.max_attempts_for_queue(assigned_queue, {})
+
+
 def test_failed_lane_waits_for_all_packed_worker_summaries(tmp_path) -> None:
     schedule = {
         "stamp": "drain-test",

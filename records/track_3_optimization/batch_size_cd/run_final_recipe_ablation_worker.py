@@ -324,6 +324,25 @@ def positive_int_from_env(
     return value
 
 
+def max_attempts_for_queue(
+    assigned_queue: dict[str, object], process_env: dict[str, str]
+) -> int:
+    """Resolve the retry contract embedded in the packed case manifests."""
+
+    key = "TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER"
+    case_values = {
+        str(case["env"][key])
+        for case in assigned_queue.get("cases", [])  # type: ignore[union-attr]
+        if key in case.get("env", {})  # type: ignore[union-attr]
+    }
+    if len(case_values) > 1:
+        raise ValueError(f"Packed worker has inconsistent {key}: {case_values}")
+    effective_env = dict(process_env)
+    if case_values:
+        effective_env[key] = next(iter(case_values))
+    return positive_int_from_env(effective_env, key, DEFAULT_MAX_ATTEMPTS_PER_WORKER)
+
+
 def terminate_process_group(process: subprocess.Popen[str], grace_seconds: float) -> None:
     if process.poll() is not None:
         return
@@ -596,11 +615,7 @@ def main() -> None:
             f"worker index {args.worker_index} outside schedule size {len(queues)}"
         )
     assigned_queue = queues[args.worker_index]
-    max_attempts = positive_int_from_env(
-        os.environ,
-        "TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER",
-        DEFAULT_MAX_ATTEMPTS_PER_WORKER,
-    )
+    max_attempts = max_attempts_for_queue(assigned_queue, dict(os.environ))
     print(
         "TRACK3_FINAL_ABLATION_WORKER "
         f"batch={schedule['batch']} index={args.worker_index} "
