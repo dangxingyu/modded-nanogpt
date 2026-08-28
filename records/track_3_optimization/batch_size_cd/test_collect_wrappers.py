@@ -65,6 +65,15 @@ def wrapper_item(cases: list[dict[str, str]], status: str = "RUNNING") -> dict:
 
 
 class CollectWrapperTest(unittest.TestCase):
+    @mock.patch.object(collect, "run_merlin")
+    def test_list_run_query_failure_does_not_retry_same_page_forever(
+        self, run_merlin: mock.Mock
+    ) -> None:
+        run_merlin.side_effect = RuntimeError("malformed Merlin response")
+        stamp = "pretraining_test_collect_failure"
+        self.assertEqual(collect.list_runs(stamp, 100), [])
+        self.assertEqual(run_merlin.call_count, len(collect.stamp_query_terms(stamp)))
+
     def test_nccl_startup_information_is_not_a_failure(self) -> None:
         parsed = collect.parse_logs(
             "NCCL version 2.27.3+cuda12.9\n"
