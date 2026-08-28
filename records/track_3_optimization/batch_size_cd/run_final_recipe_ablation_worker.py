@@ -418,7 +418,12 @@ def run_with_progress_watchdog(
             print(line, end="", file=sink, flush=True)
             if inspect_steps:
                 observed_at = time.monotonic()
-                if STEP_RE.match(line):
+                step = STEP_RE.match(line)
+                # ``step:0/... val_loss`` is the pre-training validation and
+                # precedes the first torch.compile training step.  It must not
+                # switch the watchdog from the longer startup budget to the
+                # post-compile heartbeat budget.
+                if step and int(step.group("step")) > 0:
                     events.put(("step", observed_at))
                 terminal = VAL_STEP_RE.match(line)
                 if terminal and (

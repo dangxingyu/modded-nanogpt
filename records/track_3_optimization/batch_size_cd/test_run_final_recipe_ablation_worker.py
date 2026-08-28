@@ -67,6 +67,23 @@ def test_watchdog_recovers_case_that_never_emits_a_step() -> None:
     assert time.monotonic() - started < 5
 
 
+def test_initial_validation_does_not_end_compile_startup_budget() -> None:
+    return_code, reason = worker.run_with_progress_watchdog(
+        [
+            sys.executable,
+            "-u",
+            "-c",
+            "import time; print('step:0/10 val_loss:9', flush=True); time.sleep(30)",
+        ],
+        watchdog_env(
+            TRACK3_CASE_STARTUP_TIMEOUT_SECONDS="0.2",
+            TRACK3_CASE_STALL_TIMEOUT_SECONDS="0.05",
+        ),
+    )
+    assert return_code != 0
+    assert reason == "startup_no_step_timeout"
+
+
 def test_completed_case_requires_exact_terminal_validation_step(tmp_path) -> None:
     env = terminal_env(tmp_path)
     case_dir = worker.run_dir(env)
