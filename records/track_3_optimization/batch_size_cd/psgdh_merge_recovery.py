@@ -25,7 +25,7 @@ def is_complete(row: dict[str, Any]) -> bool:
             row.get("status") == "DONE"
             and int(row["last_step"]) == int(row["total_steps"])
             and int(row["total_steps"]) > 0
-            and float(row["last_val_loss"]) == float(row["last_val_loss"])
+            and row.get("last_val_loss") is not None
         )
     except (KeyError, TypeError, ValueError):
         return False

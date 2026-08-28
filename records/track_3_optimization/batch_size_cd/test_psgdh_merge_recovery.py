@@ -45,3 +45,12 @@ def test_merge_can_emit_partial_state_for_next_recovery() -> None:
         require_complete=False,
     )
     assert [item["status"] for item in merged] == ["DONE", "FAILED"]
+
+
+def test_terminal_nan_is_complete_scientific_divergence() -> None:
+    manifest = [{"case_id": "a"}]
+
+    merged = merge_rows(manifest, [[row("a", "DONE", 10, float("nan"))]])
+
+    assert len(merged) == 1
+    assert merged[0]["status"] == "DONE"
