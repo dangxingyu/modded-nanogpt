@@ -430,7 +430,29 @@ def _patch_psgdh_from_pr316(text: str) -> str:
 '''
     if text.count(old_step_schedule) != 1:
         raise RuntimeError("Expected one PSGD per-step schedule block")
-    return text.replace(old_step_schedule, "    set_hparams(step)\n", 1)
+    text = text.replace(old_step_schedule, "    set_hparams(step)\n", 1)
+
+    gather_line = (
+        "                dist.all_gather(params_pad[base_i:base_i + world_size], "
+        "params_pad[base_i + rank])\n"
+    )
+    if text.count(gather_line) != 1:
+        raise RuntimeError("Expected one PSGD rank-sharded parameter all-gather")
+    gather_replacement = '''                if os.environ.get("TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION", "0") == "1":
+                    gather_work = dist.all_gather(
+                        params_pad[base_i:base_i + world_size],
+                        params_pad[base_i + rank],
+                        async_op=True,
+                    )
+                    gather_work.wait()
+                    torch.cuda.synchronize()
+                else:
+                    dist.all_gather(
+                        params_pad[base_i:base_i + world_size],
+                        params_pad[base_i + rank],
+                    )
+'''
+    return text.replace(gather_line, gather_replacement, 1)
 
 
 def _apply_recipe_transform(recipe: str, text: str) -> str:
@@ -662,16 +684,37 @@ def _patch_strict_collective_completion(text: str) -> str:
     ``TRACK3_STRICT_COLLECTIVE_COMPLETION``.
     """
 
+    gradient_loop_pattern = re.compile(
+        r"(?m)^(?P<indent>\s*)(?P<loop>for (?:name, )?p in "
+        r"model\.(?:named_)?parameters\(\):\n"
+        r"(?:(?P=indent)    assert p\.grad is not None[^\n]*\n)?)"
+    )
+
+    def prepare_gradient_works(match: re.Match[str]) -> str:
+        return (
+            f"{match.group('indent')}_track3_gradient_works = []\n"
+            f"{match.group('indent')}{match.group('loop')}"
+        )
+
+    text, gradient_loop_count = gradient_loop_pattern.subn(
+        prepare_gradient_works, text, count=1
+    )
     reduce_pattern = re.compile(
-        r"(?m)^(?P<indent>\s*)dist\.all_reduce\(p\.grad, op=dist\.ReduceOp\.(?P<op>SUM|AVG)\)\n"
+        r"(?m)^(?P<indent>\s*)dist\.all_reduce\(p\.grad, op=dist\.ReduceOp\."
+        r"(?P<op>SUM|AVG)\)\n"
     )
 
     def replace_reduce(match: re.Match[str]) -> str:
         indent = match.group("indent")
         return (
-            f"{indent}dist.all_reduce(p.grad, op=dist.ReduceOp.{match.group('op')})\n"
-            f'{indent}if os.environ.get("TRACK3_GRADIENT_COLLECTIVE_COMPLETION", os.environ.get("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1")) == "1":\n'
-            f"{indent}    torch.cuda.synchronize()\n"
+            f'{indent}if os.environ.get("TRACK3_EXPLICIT_GRADIENT_WORKS", "0") == "1":\n'
+            f"{indent}    _track3_gradient_works.append(\n"
+            f"{indent}        dist.all_reduce(p.grad, op=dist.ReduceOp.{match.group('op')}, async_op=True)\n"
+            f"{indent}    )\n"
+            f"{indent}else:\n"
+            f"{indent}    dist.all_reduce(p.grad, op=dist.ReduceOp.{match.group('op')})\n"
+            f'{indent}    if os.environ.get("TRACK3_GRADIENT_COLLECTIVE_COMPLETION", os.environ.get("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1")) == "1":\n'
+            f"{indent}        torch.cuda.synchronize()\n"
         )
 
     text, reduce_count = reduce_pattern.subn(replace_reduce, text, count=1)
@@ -682,7 +725,11 @@ def _patch_strict_collective_completion(text: str) -> str:
     def replace_gradient_phase(match: re.Match[str]) -> str:
         indent = match.group("indent")
         return (
-            f'{indent}if os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION", "0") == "1":\n'
+            f'{indent}if os.environ.get("TRACK3_EXPLICIT_GRADIENT_WORKS", "0") == "1":\n'
+            f"{indent}    for _track3_work in _track3_gradient_works:\n"
+            f"{indent}        _track3_work.wait()\n"
+            f"{indent}    torch.cuda.synchronize()\n"
+            f'{indent}elif os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION", "0") == "1":\n'
             f"{indent}    torch.cuda.synchronize()\n"
             f"{indent}set_hparams(step)\n"
         )
@@ -703,9 +750,15 @@ def _patch_strict_collective_completion(text: str) -> str:
         )
 
     text, step_count = step_pattern.subn(replace_step, text, count=1)
-    if reduce_count != 1 or gradient_phase_count != 1 or step_count != 1:
+    if (
+        gradient_loop_count != 1
+        or reduce_count != 1
+        or gradient_phase_count != 1
+        or step_count != 1
+    ):
         raise RuntimeError(
             "Expected one strict collective completion insertion site; "
+            f"gradient_loops={gradient_loop_count}, "
             f"gradient_reductions={reduce_count}, "
             f"gradient_phases={gradient_phase_count}, optimizer_steps={step_count}"
         )
