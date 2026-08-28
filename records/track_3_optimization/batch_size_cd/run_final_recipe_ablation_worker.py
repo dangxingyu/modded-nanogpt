@@ -64,6 +64,7 @@ RUNTIME_ENV_KEYS = (
 # terminal-loss contract.
 DEFAULT_STARTUP_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_STALL_TIMEOUT_SECONDS = 5 * 60
+DEFAULT_COMPILE_GRACE_STEPS = 10
 DEFAULT_POST_TERMINAL_GRACE_SECONDS = 3 * 60
 DEFAULT_COMPLETION_PREFLIGHT_TIMEOUT_SECONDS = 2 * 60
 DEFAULT_COMPLETION_PREFLIGHT_ATTEMPTS = 5
@@ -376,6 +377,11 @@ def run_with_progress_watchdog(
         "TRACK3_CASE_STALL_TIMEOUT_SECONDS",
         DEFAULT_STALL_TIMEOUT_SECONDS,
     )
+    compile_grace_steps = positive_int_from_env(
+        env,
+        "TRACK3_CASE_COMPILE_GRACE_STEPS",
+        DEFAULT_COMPILE_GRACE_STEPS,
+    )
     post_terminal_grace = timeout_from_env(
         env,
         "TRACK3_CASE_POST_TERMINAL_GRACE_SECONDS",
@@ -409,7 +415,7 @@ def run_with_progress_watchdog(
     )
     assert process.stdout is not None
     assert process.stderr is not None
-    events: queue.Queue[tuple[str, float]] = queue.Queue()
+    events: queue.Queue[tuple[str, float, int]] = queue.Queue()
 
     expected_step = int(env.get("TRACK3_TRAIN_STEPS", "0"))
 
@@ -419,18 +425,21 @@ def run_with_progress_watchdog(
             if inspect_steps:
                 observed_at = time.monotonic()
                 step = STEP_RE.match(line)
-                # ``step:0/... val_loss`` is the pre-training validation and
-                # precedes the first torch.compile training step.  It must not
-                # switch the watchdog from the longer startup budget to the
-                # post-compile heartbeat budget.
-                if step and int(step.group("step")) > 0:
-                    events.put(("step", observed_at))
+                # Compilation is not limited to the first optimizer step.
+                # Inductor can encounter a second graph branch several steps
+                # into a cold run.  Keep the longer startup budget through a
+                # small, configurable number of early steps, then enforce the
+                # tighter steady-state heartbeat timeout.
+                if step:
+                    observed_step = int(step.group("step"))
+                    if observed_step >= compile_grace_steps:
+                        events.put(("step", observed_at, observed_step))
                 terminal = VAL_STEP_RE.match(line)
                 if terminal and (
                     int(terminal.group("step")) == expected_step
                     and int(terminal.group("total")) == expected_step
                 ):
-                    events.put(("terminal", observed_at))
+                    events.put(("terminal", observed_at, expected_step))
 
     threads = [
         threading.Thread(
@@ -453,7 +462,7 @@ def run_with_progress_watchdog(
     watchdog_reason: str | None = None
     while process.poll() is None:
         try:
-            event, observed_at = events.get(timeout=1.0)
+            event, observed_at, _observed_step = events.get(timeout=1.0)
             if event == "step":
                 last_step_at = observed_at
             elif event == "terminal":

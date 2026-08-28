@@ -26,6 +26,7 @@ def watchdog_env(**overrides: str) -> dict[str, str]:
         {
             "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "0.1",
             "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "0.1",
+            "TRACK3_CASE_COMPILE_GRACE_STEPS": "1",
             "TRACK3_CASE_POST_TERMINAL_GRACE_SECONDS": "0.1",
             "TRACK3_CASE_TERMINATE_GRACE_SECONDS": "0.1",
             "TRACK3_CASE_CLEANUP_GRACE_SECONDS": "0.1",
@@ -78,6 +79,24 @@ def test_initial_validation_does_not_end_compile_startup_budget() -> None:
         watchdog_env(
             TRACK3_CASE_STARTUP_TIMEOUT_SECONDS="0.2",
             TRACK3_CASE_STALL_TIMEOUT_SECONDS="0.05",
+        ),
+    )
+    assert return_code != 0
+    assert reason == "startup_no_step_timeout"
+
+
+def test_early_steps_keep_compile_startup_budget() -> None:
+    return_code, reason = worker.run_with_progress_watchdog(
+        [
+            sys.executable,
+            "-u",
+            "-c",
+            "import time; print('step:3/10', flush=True); time.sleep(30)",
+        ],
+        watchdog_env(
+            TRACK3_CASE_STARTUP_TIMEOUT_SECONDS="0.2",
+            TRACK3_CASE_STALL_TIMEOUT_SECONDS="0.05",
+            TRACK3_CASE_COMPILE_GRACE_STEPS="10",
         ),
     )
     assert return_code != 0
