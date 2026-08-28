@@ -100,8 +100,6 @@ def unresolved_cases(
         case["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] = "0"
-        case["env"]["TRACK3_EXPLICIT_GRADIENT_WORKS"] = "0"
-        case["env"]["TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"] = "0"
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "0"
         case["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] = "120"
         # Preserve case_id and every scientific environment value so the

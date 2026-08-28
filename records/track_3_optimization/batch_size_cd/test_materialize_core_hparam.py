@@ -32,12 +32,7 @@ def test_core_recipes_fence_gradient_collectives_and_optimizer_steps():
     for recipe in transformed_recipes():
         code = core.materialize(recipe)
         assert code.count("TRACK3_STRICT_COLLECTIVE_COMPLETION") == 2
-        assert "_track3_gradient_works = []" in code
-        assert 'TRACK3_EXPLICIT_GRADIENT_WORKS", "0"' in code
-        assert "_track3_gradient_works.append(" in code
-        assert "async_op=True" in code
-        assert "for _track3_work in _track3_gradient_works:" in code
-        assert "_track3_work.wait()" in code
+        assert "_track3_gradient_works" not in code
         assert 'TRACK3_GRADIENT_PHASE_COMPLETION", "0"' in code
         assert re.search(
             r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_OPTIMIZER_STEP_COMPLETION", '
@@ -56,24 +51,11 @@ def test_psgdh_preserves_pr316_update_and_exposes_track3_controls():
     assert 'TRACK3_PRECOND_LR_MULT' in code
     assert 'TRACK3_H_COOLDOWN_FRAC' in code
     assert 'TRACK3_AUX_COOLDOWN_FRAC' in code
-    assert 'TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION' in code
-    assert "gather_work.wait()" in code
-    gradient_wait_start = code.rindex(
-        'if os.environ.get("TRACK3_EXPLICIT_GRADIENT_WORKS"'
-    )
-    gradient_wait = code[
-        gradient_wait_start:
-        code.index(
-            'elif os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION"',
-            gradient_wait_start,
-        )
-    ]
-    assert "torch.cuda.synchronize()" not in gradient_wait
-    gather_wait = code[
-        code.index('if os.environ.get("TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"'):
-        code.index("                else:\n", code.index("gather_work.wait()"))
-    ]
-    assert "torch.cuda.synchronize()" not in gather_wait
+    assert "async_op=True" not in code
+    assert code.count(
+        "dist.all_gather(params_pad[base_i:base_i + world_size], "
+        "params_pad[base_i + rank])"
+    ) == 1
     assert "get_psgd_lr" not in code
     assert "get_adam_lr_scale" not in code
     assert code.count("_track3_cd_set_scheduled_weight_decay(group, step, train_steps)") == 2

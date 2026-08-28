@@ -202,8 +202,6 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "TRACK3_STRICT_COLLECTIVE_COMPLETION": "0",
                 "TRACK3_GRADIENT_COLLECTIVE_COMPLETION": "0",
                 "TRACK3_GRADIENT_PHASE_COMPLETION": "0",
-                "TRACK3_EXPLICIT_GRADIENT_WORKS": "0",
-                "TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION": "0",
                 "TRACK3_OPTIMIZER_STEP_COMPLETION": "0",
                 "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "10800",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
