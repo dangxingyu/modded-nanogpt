@@ -58,6 +58,22 @@ def test_psgdh_preserves_pr316_update_and_exposes_track3_controls():
     assert 'TRACK3_AUX_COOLDOWN_FRAC' in code
     assert 'TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION' in code
     assert "gather_work.wait()" in code
+    gradient_wait_start = code.rindex(
+        'if os.environ.get("TRACK3_EXPLICIT_GRADIENT_WORKS"'
+    )
+    gradient_wait = code[
+        gradient_wait_start:
+        code.index(
+            'elif os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION"',
+            gradient_wait_start,
+        )
+    ]
+    assert "torch.cuda.synchronize()" not in gradient_wait
+    gather_wait = code[
+        code.index('if os.environ.get("TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"'):
+        code.index("                else:\n", code.index("gather_work.wait()"))
+    ]
+    assert "torch.cuda.synchronize()" not in gather_wait
     assert "get_psgd_lr" not in code
     assert "get_adam_lr_scale" not in code
     assert code.count("_track3_cd_set_scheduled_weight_decay(group, step, train_steps)") == 2

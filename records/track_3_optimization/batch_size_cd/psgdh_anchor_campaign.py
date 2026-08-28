@@ -195,15 +195,14 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "TRACK3_HARDWARE_FAMILY": "H20",
                 "TRACK3_DIST_TIMEOUT_MINUTES": "180",
                 "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "10800",
-                # Per-gradient fences reproducibly split H20 ranks between
-                # all_reduce and synchronize.  PSGD still needs one completion
-                # fence after its whole optimizer step because ranks own
-                # different matrices and therefore perform unequal work.
+                # Enqueue each phase explicitly and use Work.wait() to place
+                # stream dependencies.  Device-wide fences can deadlock when
+                # another rank is still entering the matching collective.
                 "TRACK3_GRADIENT_COLLECTIVE_COMPLETION": "0",
                 "TRACK3_GRADIENT_PHASE_COMPLETION": "0",
                 "TRACK3_EXPLICIT_GRADIENT_WORKS": "1",
                 "TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION": "1",
-                "TRACK3_OPTIMIZER_STEP_COMPLETION": "1",
+                "TRACK3_OPTIMIZER_STEP_COMPLETION": "0",
                 "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "10800",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
                 "TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5",

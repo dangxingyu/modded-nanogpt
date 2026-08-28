@@ -95,14 +95,14 @@ def unresolved_cases(
             case_stall_timeout_seconds
         )
         case["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "10800"
-        # PSGD needs asynchronous gradient enqueue plus one completion fence
-        # after the rank-sharded optimizer work.  Force the corrected behavior
-        # even when the source manifest predates these independent controls.
+        # PSGD uses explicit asynchronous work handles and stream dependency
+        # waits.  Device-wide fences can deadlock while a peer rank is still
+        # entering the matching collective.
         case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] = "0"
         case["env"]["TRACK3_EXPLICIT_GRADIENT_WORKS"] = "1"
         case["env"]["TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"] = "1"
-        case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "1"
+        case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "0"
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.
         cases.append(case)

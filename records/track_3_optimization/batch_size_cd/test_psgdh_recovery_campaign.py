@@ -66,7 +66,7 @@ def test_unresolved_cases_preserve_identity_and_science() -> None:
     assert cases[0]["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] == "0"
     assert cases[0]["env"]["TRACK3_EXPLICIT_GRADIENT_WORKS"] == "1"
     assert cases[0]["env"]["TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION"] == "1"
-    assert cases[0]["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] == "1"
+    assert cases[0]["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] == "0"
     assert manifest[1]["env"]["TRACK3_STAMP"] == "source"
 
 

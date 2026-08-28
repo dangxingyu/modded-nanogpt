@@ -445,7 +445,6 @@ def _patch_psgdh_from_pr316(text: str) -> str:
                         async_op=True,
                     )
                     gather_work.wait()
-                    torch.cuda.synchronize()
                 else:
                     dist.all_gather(
                         params_pad[base_i:base_i + world_size],
@@ -728,7 +727,6 @@ def _patch_strict_collective_completion(text: str) -> str:
             f'{indent}if os.environ.get("TRACK3_EXPLICIT_GRADIENT_WORKS", "0") == "1":\n'
             f"{indent}    for _track3_work in _track3_gradient_works:\n"
             f"{indent}        _track3_work.wait()\n"
-            f"{indent}    torch.cuda.synchronize()\n"
             f'{indent}elif os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION", "0") == "1":\n'
             f"{indent}    torch.cuda.synchronize()\n"
             f"{indent}set_hparams(step)\n"
