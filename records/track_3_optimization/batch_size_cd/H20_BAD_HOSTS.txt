@@ -1185,3 +1185,21 @@ g340-cd51-7700-e93c-1893-204f-dc2b
 2605:340:cd51:7700:184:7be7:1ac9:bf17
 # Nanochat PSGD anchor trial 405221201: Arnold machine-fault classification.
 2605:340:cd51:7700:54e6:3855:1908:d29
+# PSGD-H 512k packed pCD trial 405263546: these workers stopped emitting
+# training-step heartbeats for 30 minutes and were killed by the case watchdog.
+26.138.57.186
+2605:340:cd51:7700:630f:e9d5:5bcd:51b7
+26.152.16.146
+2605:340:cd51:7700:4997:c0aa:4be5:c4e9
+26.138.73.18
+2605:340:cd51:7700:9256:ac61:b5ae:7cc6
+26.129.135.26
+2605:340:cd51:7700:a3e:f1ef:2215:cd83
+26.129.176.210
+2605:340:cd51:7700:d328:837c:b15:638f
+26.152.13.26
+2605:340:cd51:7700:a47e:846f:c717:8c83
+26.138.87.34
+2605:340:cd51:7700:efd7:b8c8:2ad4:6731
+26.138.94.90
+2605:340:cd51:7700:598e:9ef1:4a6b:eb6a
