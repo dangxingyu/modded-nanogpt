@@ -112,3 +112,17 @@ def test_build_report_prefers_complete_rows_over_earlier_snapshots(tmp_path):
     raw = (tmp_path / "report" / "raw_results.csv").read_text()
     assert "2.7" in raw
     assert "2.8" not in raw
+
+
+def test_build_report_preserves_terminal_scientific_divergence(tmp_path):
+    round_dir = tmp_path / "round"
+    _write_round(round_dir)
+    rows = json.loads((round_dir / "collected.json").read_text())
+    rows[1]["last_val_loss"] = None
+    rows[1]["failure_kind"] = "nan_or_divergence"
+    (round_dir / "collected.json").write_text(json.dumps(rows))
+
+    build_report([round_dir], tmp_path / "report")
+
+    raw = (tmp_path / "report" / "raw_results.csv").read_text()
+    assert "nan_or_divergence" in raw

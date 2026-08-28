@@ -21,6 +21,7 @@ RAW_FIELDS = (
     "last_step",
     "total_steps",
     "last_val_loss",
+    "failure_kind",
     "hardware_family",
     "gpuv",
     "matrix_lr_mult",
@@ -68,7 +69,10 @@ def load_round(path: Path) -> dict[str, Any]:
         for row in collected
         if row.get("status") != "DONE"
         or int(row.get("last_step") or -1) != int(row.get("total_steps") or -2)
-        or row.get("last_val_loss") is None
+        or (
+            row.get("last_val_loss") is None
+            and row.get("failure_kind") != "nan_or_divergence"
+        )
     ]
     if invalid:
         raise ValueError(f"{path}: invalid terminals: {invalid}")
