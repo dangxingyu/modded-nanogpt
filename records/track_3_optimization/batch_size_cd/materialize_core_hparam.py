@@ -391,7 +391,12 @@ def _patch_psgdh_from_pr316(text: str) -> str:
     text = text.replace(
         import_marker,
         import_marker
-        + 'if os.environ.get("TRACK3_ISOLATE_INDUCTOR_CACHE", "1") == "1":\n'
+        # A separate cache per rank makes all eight ranks compile the same
+        # kernels independently.  At campaign scale that can leave a subset
+        # of workers in Inductor for many minutes.  PyTorch's cache is built
+        # for concurrent readers/writers, so share it by default and retain
+        # rank isolation only as an explicit diagnostic override.
+        + 'if os.environ.get("TRACK3_ISOLATE_INDUCTOR_CACHE", "0") == "1":\n'
         + '    _track3_local_rank = os.environ.get("LOCAL_RANK", "0")\n'
         + '    os.environ.setdefault(\n'
         + '        "TORCHINDUCTOR_CACHE_DIR",\n'

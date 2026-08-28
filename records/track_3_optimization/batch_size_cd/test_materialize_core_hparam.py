@@ -64,6 +64,7 @@ def test_psgdh_preserves_pr316_update_and_exposes_track3_controls():
     assert "get_psgd_lr" not in code
     assert "get_adam_lr_scale" not in code
     assert code.index("TRACK3_ISOLATE_INDUCTOR_CACHE") < code.index("import torch")
+    assert 'TRACK3_ISOLATE_INDUCTOR_CACHE", "0"' in code
     assert "torchinductor_track3_rank_{_track3_local_rank}" in code
     assert code.count("_track3_cd_set_scheduled_weight_decay(group, step, train_steps)") == 2
     compile(code, "train_psgdh_track3.py", "exec")
