@@ -83,6 +83,7 @@ def build_report(round_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
         writer.writerows(raw_rows)
 
     round_rows = []
+    coordinate_rows = []
     for batch, batch_rounds in by_batch.items():
         for index, round_result in enumerate(batch_rounds):
             selection = round_result["selection"]
@@ -101,6 +102,20 @@ def build_report(round_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
                     ),
                 }
             )
+            for coordinate, evidence in selection["evidence"].items():
+                coordinate_rows.append(
+                    {
+                        "batch": batch,
+                        "round_index": index,
+                        "coordinate": coordinate,
+                        "raw_best_case_id": evidence["raw_best_case_id"],
+                        "raw_improvement": evidence["raw_improvement"],
+                        "accepted": evidence["winner_case_id"]
+                        != selection["center_case_id"],
+                        "accepted_improvement": evidence["improvement"],
+                        "boundary": evidence["boundary"],
+                    }
+                )
     round_fields = tuple(round_rows[0])
     with (output_dir / "round_summary.csv").open(
         "w", newline="", encoding="utf-8"
@@ -108,6 +123,13 @@ def build_report(round_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
         writer = csv.DictWriter(handle, fieldnames=round_fields)
         writer.writeheader()
         writer.writerows(round_rows)
+    coordinate_fields = tuple(coordinate_rows[0])
+    with (output_dir / "coordinate_improvements.csv").open(
+        "w", newline="", encoding="utf-8"
+    ) as handle:
+        writer = csv.DictWriter(handle, fieldnames=coordinate_fields)
+        writer.writeheader()
+        writer.writerows(coordinate_rows)
 
     final_recipes = {
         batch: batch_rounds[-1]["selection"]["center_env"]
@@ -124,8 +146,51 @@ def build_report(round_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
     (output_dir / "final_recipes.json").write_text(
         json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+    write_plots(round_rows, coordinate_rows, output_dir)
     write_markdown(result, output_dir)
     return result
+
+
+def write_plots(
+    round_rows: list[dict[str, Any]],
+    coordinate_rows: list[dict[str, Any]],
+    output_dir: Path,
+) -> None:
+    import matplotlib.pyplot as plt
+
+    by_batch: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for row in round_rows:
+        by_batch[row["batch"]].append(row)
+    figure, axis = plt.subplots(figsize=(6.4, 4.2))
+    for batch, rows in sorted(by_batch.items()):
+        axis.plot(
+            [row["round_index"] for row in rows],
+            [row["center_loss"] for row in rows],
+            "o-",
+            label=batch,
+        )
+    axis.set_xlabel("Coordinate-descent round")
+    axis.set_ylabel("Center validation loss")
+    axis.legend(title="Batch")
+    figure.tight_layout()
+    figure.savefig(output_dir / "center_loss_by_round.svg")
+    plt.close(figure)
+
+    accepted = [row for row in coordinate_rows if row["accepted"]]
+    if not accepted:
+        return
+    labels = [
+        f"{row['batch']} r{row['round_index']} {row['coordinate']}" for row in accepted
+    ]
+    figure, axis = plt.subplots(figsize=(8.0, max(3.0, 0.32 * len(labels))))
+    positions = list(range(len(accepted)))
+    axis.barh(positions, [row["accepted_improvement"] for row in accepted])
+    axis.set_yticks(positions, labels)
+    axis.invert_yaxis()
+    axis.set_xlabel("Accepted validation-loss improvement")
+    figure.tight_layout()
+    figure.savefig(output_dir / "accepted_coordinate_improvements.svg")
+    plt.close(figure)
 
 
 def write_markdown(result: dict[str, Any], output_dir: Path) -> None:
@@ -154,8 +219,9 @@ def write_markdown(result: dict[str, Any], output_dir: Path) -> None:
         [
             "",
             "The complete per-case observations are in `raw_results.csv`. The",
-            "round-level decisions are in `round_summary.csv`, and the exact",
-            "final environment multipliers are in `final_recipes.json`.",
+            "round-level decisions are in `round_summary.csv`, every coordinate",
+            "decision is in `coordinate_improvements.csv`, and the exact final",
+            "environment multipliers are in `final_recipes.json`.",
         ]
     )
     (output_dir / "REPORT.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

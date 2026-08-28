@@ -42,6 +42,9 @@ def _write_round(path, batch="512k", hardware="H20"):
             "matrix_lr": {
                 "winner_case_id": "case-0",
                 "raw_best_case_id": "case-0",
+                "raw_improvement": 0.0,
+                "improvement": 0.0,
+                "boundary": False,
             }
         },
         "converged": True,
@@ -60,6 +63,8 @@ def test_build_report_writes_credential_free_tables(tmp_path):
     assert result["batches"] == ["512k"]
     assert "job_run_id" not in (output / "raw_results.csv").read_text()
     assert "512k" in (output / "REPORT.md").read_text()
+    assert (output / "coordinate_improvements.csv").is_file()
+    assert (output / "center_loss_by_round.svg").is_file()
 
 
 def test_build_report_rejects_mixed_hardware(tmp_path):
