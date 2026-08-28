@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import math
 import unittest
 from unittest import mock
 import zlib
@@ -179,6 +180,35 @@ class CollectWrapperTest(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "FAILED")
         self.assertEqual(rows[0]["failure_kind"], "incomplete_artifact")
         self.assertEqual(rows[0]["last_step"], 5)
+
+    @mock.patch.object(collect, "fetch_merlin_text")
+    @mock.patch.object(collect, "read_run_dir_exit_status")
+    @mock.patch.object(collect, "read_run_dir_logs")
+    def test_nonfinite_terminal_is_complete_scientific_divergence(
+        self,
+        read_logs: mock.Mock,
+        read_exit: mock.Mock,
+        fetch_parent: mock.Mock,
+    ) -> None:
+        cases = [child("child-a", "matrix_lr")]
+        read_logs.return_value = (
+            "step:13000/13000 val_loss:nan",
+            "TRACK3_CASE_ID=child-a\n",
+        )
+        read_exit.return_value = "0\n"
+        fetch_parent.return_value = ""
+
+        rows = collect.rows_from_item(
+            "pretraining_wrapper_test",
+            wrapper_item(cases, status="DONE"),
+            fetch_logs=True,
+            probe_hdfs=True,
+            timeout=1,
+        )
+
+        self.assertEqual(rows[0]["status"], "DONE")
+        self.assertTrue(math.isnan(rows[0]["last_val_loss"]))
+        self.assertEqual(rows[0]["failure_kind"], "nan_or_divergence")
 
 
 if __name__ == "__main__":

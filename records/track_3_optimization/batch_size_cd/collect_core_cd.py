@@ -508,7 +508,14 @@ def child_status(outer_status: str, exit_status: str, run_dir_present: bool) -> 
     return "PENDING"
 
 
-def has_complete_child_evidence(row: dict[str, Any]) -> bool:
+def has_terminal_child_evidence(row: dict[str, Any]) -> bool:
+    """Return whether a child reached its exact terminal validation step.
+
+    A non-finite terminal loss is still complete scientific evidence.  It is a
+    divergent hyperparameter arm, not an interrupted artifact, and must remain
+    available to coordinate selection as a loss of positive infinity.
+    """
+
     expected_steps = numeric(row.get("train_steps"))
     last_step = numeric(row.get("last_step"))
     last_val_step = numeric(row.get("last_val_step"))
@@ -520,7 +527,6 @@ def has_complete_child_evidence(row: dict[str, Any]) -> bool:
         and last_val_step is not None
         and last_val_step >= expected_steps
         and last_val_loss is not None
-        and math.isfinite(last_val_loss)
     )
 
 
@@ -744,9 +750,12 @@ def rows_from_item(
             runtime_text_override=runtime_text,
             allow_merlin_loss_fallback=False,
         )
-        if status == "DONE" and not has_complete_child_evidence(row):
-            row["status"] = "FAILED"
-            row["failure_kind"] = "incomplete_artifact"
+        if status == "DONE":
+            if not has_terminal_child_evidence(row):
+                row["status"] = "FAILED"
+                row["failure_kind"] = "incomplete_artifact"
+            elif not math.isfinite(float(row["last_val_loss"])):
+                row["failure_kind"] = "nan_or_divergence"
         row["wrapper_case_id"] = outer_env.get("TRACK3_CASE_ID", "")
         row["job_name"] = f"{item.get('job_def_name', '')}:{case_id}"
         rows.append(row)
@@ -1066,7 +1075,7 @@ def load_terminal_cache(
     for row in rows:
         if not row.get("job_run_id") or row.get("status") not in TERMINAL_STATUSES:
             continue
-        if row.get("status") == "DONE" and not has_complete_child_evidence(row):
+        if row.get("status") == "DONE" and not has_terminal_child_evidence(row):
             continue
         cache[(row["job_run_id"], row.get("case_id", ""))] = row
     return cache
@@ -1235,7 +1244,6 @@ def main() -> None:
             if stamp in packed_manifests and not get_env(item).get("TRACK3_STAMP"):
                 inject_packed_manifest(item, packed_manifests[stamp])
             status = str(item.get("status", ""))
-            job_run_id = str(item.get("id", ""))
             cached = cached_rows_for_item(item, terminal_cache)
             if cached is not None:
                 print(f"reuse: {index}/{len(items)} {status} {item.get('job_def_name', '')}", flush=True)
