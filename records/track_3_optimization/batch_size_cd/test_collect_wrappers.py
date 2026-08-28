@@ -65,6 +65,15 @@ def wrapper_item(cases: list[dict[str, str]], status: str = "RUNNING") -> dict:
 
 
 class CollectWrapperTest(unittest.TestCase):
+    def test_injects_local_manifest_into_embedded_schedule_job(self) -> None:
+        cases = [child("child-a", "center"), child("child-b", "matrix_lr")]
+        item = {"meta": {"job_def_version": {"env": {"HDFS_CODE_TGZ": "x"}}}}
+        collect.inject_packed_manifest(item, cases)
+        env = collect.get_env(item)
+        self.assertEqual(env["TRACK3_COORD"], "wrapper")
+        self.assertEqual(collect.decode_wrapper_cases(env), cases)
+        self.assertEqual(env["HDFS_CODE_TGZ"], "x")
+
     @mock.patch.object(collect, "run_merlin")
     def test_list_run_query_failure_does_not_retry_same_page_forever(
         self, run_merlin: mock.Mock

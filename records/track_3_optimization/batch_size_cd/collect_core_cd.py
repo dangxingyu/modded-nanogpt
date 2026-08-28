@@ -450,6 +450,46 @@ def decode_wrapper_cases(env: dict[str, str]) -> list[dict[str, str]]:
     return normalized
 
 
+def load_packed_manifests(paths: list[Path]) -> dict[str, list[dict[str, str]]]:
+    manifests: dict[str, list[dict[str, str]]] = {}
+    for path in paths:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(document, list) or not document:
+            raise ValueError(f"packed manifest must be a non-empty case list: {path}")
+        cases = []
+        for case in document:
+            env = case.get("env") if isinstance(case, dict) else None
+            if not isinstance(env, dict) or not env.get("TRACK3_CASE_ID"):
+                raise ValueError(f"packed manifest case is missing env identity: {path}")
+            cases.append({str(key): str(value) for key, value in env.items()})
+        stamps = {case.get("TRACK3_STAMP", "") for case in cases}
+        if len(stamps) != 1 or "" in stamps:
+            raise ValueError(f"packed manifest must contain exactly one stamp: {path}")
+        stamp = next(iter(stamps))
+        if stamp in manifests:
+            raise ValueError(f"duplicate packed manifest stamp: {stamp}")
+        manifests[stamp] = cases
+    return manifests
+
+
+def inject_packed_manifest(item: dict[str, Any], cases: list[dict[str, str]]) -> None:
+    """Expose an embedded packed schedule through the collector wrapper contract."""
+
+    raw = json.dumps(cases, sort_keys=True, separators=(",", ":")).encode()
+    encoded = base64.b64encode(zlib.compress(raw)).decode("ascii")
+    meta = item.setdefault("meta", {})
+    version = meta.setdefault("job_def_version", {})
+    env = version.setdefault("env", {})
+    env.update(
+        {
+            "TRACK3_STAMP": cases[0]["TRACK3_STAMP"],
+            "TRACK3_CASE_ID": "packed_manifest",
+            "TRACK3_COORD": "wrapper",
+            "TRACK3_WRAPPER_CASES_ZLIB_B64": encoded,
+        }
+    )
+
+
 def child_status(outer_status: str, exit_status: str, run_dir_present: bool) -> str:
     token = exit_status.strip().splitlines()[0] if exit_status.strip() else ""
     if token:
@@ -1110,6 +1150,13 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Reuse parsed rows for immutable terminal jobs from a prior collect CSV.",
     )
+    parser.add_argument(
+        "--packed-manifests",
+        type=Path,
+        nargs="*",
+        default=[],
+        help="Local case manifests for packed jobs whose schedule is embedded in entrypoint.",
+    )
     return parser.parse_args()
 
 
@@ -1139,6 +1186,10 @@ def main() -> None:
     )
     statuses = set(args.statuses) if args.statuses else None
     terminal_cache = load_terminal_cache(args.reuse_terminal_from)
+    try:
+        packed_manifests = load_packed_manifests(args.packed_manifests)
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+        raise SystemExit(str(error)) from error
     print(f"terminal_cache={len(terminal_cache)}", flush=True)
     fetched = 0
     rows: list[dict[str, Any]] = []
@@ -1165,6 +1216,10 @@ def main() -> None:
             for item in direct_items:
                 env = get_env(item)
                 stamp = env.get("TRACK3_STAMP", "")
+                if not stamp and len(args.stamps) == 1 and args.stamps[0] in packed_manifests:
+                    inject_packed_manifest(item, packed_manifests[args.stamps[0]])
+                    env = get_env(item)
+                    stamp = env.get("TRACK3_STAMP", "")
                 if stamp not in requested_stamps:
                     raise SystemExit(
                         f"job {item.get('id', '')} has TRACK3_STAMP={stamp!r}, "
@@ -1177,6 +1232,8 @@ def main() -> None:
             items = [item for item in items if str(item.get("id", "")) in requested_job_ids]
         print(f"{stamp}: {len(items)} runs", flush=True)
         for index, item in enumerate(items, start=1):
+            if stamp in packed_manifests and not get_env(item).get("TRACK3_STAMP"):
+                inject_packed_manifest(item, packed_manifests[stamp])
             status = str(item.get("status", ""))
             job_run_id = str(item.get("id", ""))
             cached = cached_rows_for_item(item, terminal_cache)
