@@ -227,7 +227,14 @@ def schedule_cases(
             key=lambda item: (item["estimated_runtime_minutes"], item["worker_index"]),
         )
         queued = copy.deepcopy(case)
-        runtime_minutes = 12.0 * float(case["train_steps"]) / 3250.0
+        # Larger global batches use proportionally more accumulation work per
+        # optimizer step.  Fixed-token cases therefore retain an observed
+        # ~30 minute floor instead of becoming arbitrarily cheap in the LPT
+        # estimate.  The 128K step-count term captures its extra loop overhead.
+        runtime_minutes = max(
+            30.0,
+            12.0 * float(case["train_steps"]) / 3250.0,
+        )
         queued["estimated_runtime_minutes"] = runtime_minutes
         queued["estimated_h20_minutes"] = runtime_minutes
         queue["cases"].append(queued)

@@ -45,6 +45,19 @@ def test_schedule_is_packed_and_balanced():
     assert counts == [4] * 8
 
 
+def test_fixed_token_runtime_estimate_has_large_batch_floor():
+    value = args()
+    value.batch = "2m"
+    schedule = campaign.schedule_cases(campaign.build_cases(value), workers=8)
+    case_minutes = [
+        case["estimated_runtime_minutes"]
+        for queue in schedule["worker_queues"]
+        for case in queue["cases"]
+    ]
+    assert set(case_minutes) == {30.0}
+    assert schedule["worker_queues"][0]["estimated_runtime_minutes"] == 120.0
+
+
 def test_unguaranteed_quota_is_an_explicit_payload_mode():
     payload = {"resource_config": {"arnold_config": {"roles": [{}]}}}
     campaign.apply_quota_mode(payload, False)
