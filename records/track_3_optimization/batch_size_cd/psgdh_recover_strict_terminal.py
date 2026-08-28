@@ -78,6 +78,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--job-run-id", required=True)
     parser.add_argument("--trial-id", action="append", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Write recovered terminal rows while leaving genuinely unfinished cases intact.",
+    )
     return parser.parse_args()
 
 
@@ -89,7 +94,7 @@ def main() -> None:
         evidence.append((trial_id, summary["strict_terminal_cases"]))
     rows = recover_rows(load_rows(args.collected), evidence)
     incomplete = [str(row.get("case_id", "")) for row in rows if not is_complete(row)]
-    if incomplete:
+    if incomplete and not args.allow_incomplete:
         raise SystemExit(f"incomplete rows after strict recovery: {incomplete}")
     write_rows(rows, args.output)
     print(f"recovered_rows={sum(row.get('log_source') == 'merlin_strict_terminal' for row in rows)}")
