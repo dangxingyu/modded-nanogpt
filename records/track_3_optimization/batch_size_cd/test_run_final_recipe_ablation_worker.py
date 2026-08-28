@@ -103,6 +103,29 @@ def test_early_steps_keep_compile_startup_budget() -> None:
     assert reason == "startup_no_step_timeout"
 
 
+def test_each_early_step_refreshes_compile_startup_budget() -> None:
+    started = time.monotonic()
+    return_code, reason = worker.run_with_progress_watchdog(
+        [
+            sys.executable,
+            "-u",
+            "-c",
+            (
+                "import time; print('step:1/10', flush=True); time.sleep(0.15); "
+                "print('step:2/10', flush=True); time.sleep(30)"
+            ),
+        ],
+        watchdog_env(
+            TRACK3_CASE_STARTUP_TIMEOUT_SECONDS="0.25",
+            TRACK3_CASE_STALL_TIMEOUT_SECONDS="0.05",
+            TRACK3_CASE_COMPILE_GRACE_STEPS="10",
+        ),
+    )
+    assert return_code != 0
+    assert reason == "startup_no_step_timeout"
+    assert time.monotonic() - started >= 0.35
+
+
 def test_completed_case_requires_exact_terminal_validation_step(tmp_path) -> None:
     env = terminal_env(tmp_path)
     case_dir = worker.run_dir(env)

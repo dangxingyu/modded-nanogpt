@@ -434,6 +434,8 @@ def run_with_progress_watchdog(
                     observed_step = int(step.group("step"))
                     if observed_step >= compile_grace_steps:
                         events.put(("step", observed_at, observed_step))
+                    elif observed_step > 0:
+                        events.put(("compile_step", observed_at, observed_step))
                 terminal = VAL_STEP_RE.match(line)
                 if terminal and (
                     int(terminal.group("step")) == expected_step
@@ -457,6 +459,7 @@ def run_with_progress_watchdog(
         thread.start()
 
     started = time.monotonic()
+    last_compile_progress_at: float | None = None
     last_step_at: float | None = None
     terminal_at: float | None = None
     watchdog_reason: str | None = None
@@ -465,6 +468,8 @@ def run_with_progress_watchdog(
             event, observed_at, _observed_step = events.get(timeout=1.0)
             if event == "step":
                 last_step_at = observed_at
+            elif event == "compile_step":
+                last_compile_progress_at = observed_at
             elif event == "terminal":
                 terminal_at = observed_at
         except queue.Empty:
@@ -479,7 +484,7 @@ def run_with_progress_watchdog(
         elif (
             last_step_at is None
             and startup_timeout > 0
-            and now - started > startup_timeout
+            and now - (last_compile_progress_at or started) > startup_timeout
         ):
             watchdog_reason = "startup_no_step_timeout"
         elif (
