@@ -1221,3 +1221,11 @@ g340-cd51-7700-e6bc-c50e-94b2-7773
 g340-cd51-7700-2f4-fa24-c4d0-4e3e
 g340-cd51-7700-5557-ae78-119f-34a4
 g340-cd51-7700-d32e-8e0b-c3f6-ad02
+# PSGD-H 512k r4 trial 405673099: these five nodes reproducibly left one rank
+# in the next gradient all-reduce while seven peers stopped in fused Adam or
+# PSGD CUDA work. Peer nodes in the same 224-H20 packed job kept progressing.
+2605:340:cd51:7700:76d0:c5e6:5e8f:80ee
+2605:340:cd51:7700:24f3:17dd:a104:78b1
+2605:340:cd51:7700:a453:56d:8f66:7855
+2605:340:cd51:7700:c73b:4040:c84e:3529
+2605:340:cd51:7700:6ce7:cf04:c97f:c7ad
