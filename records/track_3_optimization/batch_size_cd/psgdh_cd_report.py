@@ -241,6 +241,34 @@ def write_markdown(result: dict[str, Any], output_dir: Path) -> None:
     lines.extend(
         [
             "",
+            "## Final recipes",
+            "",
+            "Learning-rate entries multiply the corresponding PR #316 reference",
+            "learning rate. A first- or second-moment entry multiplies one minus",
+            "the corresponding reference beta before the beta is reconstructed.",
+            "Cooldown entries are absolute fractions of the training horizon.",
+            "",
+            "| Batch | Matrix LR factor | Preconditioner LR factor | Matrix first-moment factor | Auxiliary LR factor | Auxiliary first-moment factor | Auxiliary second-moment factor | Auxiliary cooldown | Matrix cooldown |",
+            "|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    keys = (
+        "TRACK3_MATRIX_LR_MULT",
+        "TRACK3_PRECOND_LR_MULT",
+        "TRACK3_MATRIX_BETA1_OM_MULT",
+        "TRACK3_AUX_LR_MULT",
+        "TRACK3_AUX_BETA1_OM_MULT",
+        "TRACK3_AUX_BETA2_OM_MULT",
+        "TRACK3_AUX_COOLDOWN_FRAC",
+        "TRACK3_H_COOLDOWN_FRAC",
+    )
+    for batch in result["batches"]:
+        recipe = result["final_recipes"][batch]
+        values = " | ".join(str(recipe.get(key, "")) for key in keys)
+        lines.append(f"| {batch} | {values} |")
+    lines.extend(
+        [
+            "",
             "The complete per-case observations are in `raw_results.csv`. The",
             "round-level decisions are in `round_summary.csv`, every coordinate",
             "decision is in `coordinate_improvements.csv`, and the exact final",
