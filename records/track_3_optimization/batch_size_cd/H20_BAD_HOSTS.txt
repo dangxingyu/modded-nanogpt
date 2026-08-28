@@ -1216,3 +1216,8 @@ g340-cd51-7700-3fb2-e72-2c1a-4c6b
 # CPU-saturated Inductor compilation for more than one hour.
 g340-cd51-7700-dfbd-4bb-fa5d-8781
 g340-cd51-7700-e6bc-c50e-94b2-7773
+# PSGD-H 2m r4 hedge trial 405605850: these hosts remained in the
+# CPU-saturated compile tail while seven peer cases finished training.
+g340-cd51-7700-2f4-fa24-c4d0-4e3e
+g340-cd51-7700-5557-ae78-119f-34a4
+g340-cd51-7700-d32e-8e0b-c3f6-ad02
