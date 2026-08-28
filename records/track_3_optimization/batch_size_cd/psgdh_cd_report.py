@@ -32,6 +32,11 @@ RAW_FIELDS = (
     "aux_cooldown_frac",
     "hidden_cooldown_frac",
 )
+BATCH_ORDER = {"128k": 0, "512k": 1, "1m": 2, "2m": 3}
+
+
+def batch_sort_key(batch: str) -> tuple[int, str]:
+    return BATCH_ORDER.get(batch, len(BATCH_ORDER)), batch
 
 
 def load_round(path: Path) -> dict[str, Any]:
@@ -131,14 +136,15 @@ def build_report(round_dirs: list[Path], output_dir: Path) -> dict[str, Any]:
         writer.writeheader()
         writer.writerows(coordinate_rows)
 
+    ordered_batches = sorted(by_batch, key=batch_sort_key)
     final_recipes = {
-        batch: batch_rounds[-1]["selection"]["center_env"]
-        for batch, batch_rounds in sorted(by_batch.items())
+        batch: by_batch[batch][-1]["selection"]["center_env"]
+        for batch in ordered_batches
     }
     result = {
         "schema": "track3_psgdh_cd_report_v1",
         "acceptance_threshold": 0.003,
-        "batches": sorted(by_batch),
+        "batches": ordered_batches,
         "round_count": len(rounds),
         "final_recipes": final_recipes,
         "rounds": round_rows,
@@ -162,7 +168,8 @@ def write_plots(
     for row in round_rows:
         by_batch[row["batch"]].append(row)
     figure, axis = plt.subplots(figsize=(6.4, 4.2))
-    for batch, rows in sorted(by_batch.items()):
+    for batch in sorted(by_batch, key=batch_sort_key):
+        rows = by_batch[batch]
         axis.plot(
             [row["round_index"] for row in rows],
             [row["center_loss"] for row in rows],

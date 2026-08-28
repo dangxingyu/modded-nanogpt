@@ -72,3 +72,13 @@ def test_build_report_rejects_mixed_hardware(tmp_path):
     _write_round(round_dir, hardware="H800")
     with pytest.raises(ValueError, match="must all use H20"):
         build_report([round_dir], tmp_path / "report")
+
+
+def test_build_report_orders_batches_by_token_count(tmp_path):
+    round_dirs = []
+    for batch in ("2m", "512k", "128k", "1m"):
+        round_dir = tmp_path / batch
+        _write_round(round_dir, batch=batch)
+        round_dirs.append(round_dir)
+    result = build_report(round_dirs, tmp_path / "report")
+    assert result["batches"] == ["128k", "512k", "1m", "2m"]
