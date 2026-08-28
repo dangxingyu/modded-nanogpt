@@ -66,6 +66,9 @@ def test_anchor_cases_allow_cold_psgd_compile_to_finish():
     assert {
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] for case in cases
     } == {"0"}
+    assert {
+        case["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] for case in cases
+    } == {"1"}
 
 
 def test_schedule_is_packed_and_balanced():

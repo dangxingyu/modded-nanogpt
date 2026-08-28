@@ -31,6 +31,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--submit", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument(
+        "--force-case-id",
+        action="append",
+        default=[],
+        help="Replay only these source-manifest case IDs, even if already terminal.",
+    )
     parser.add_argument("--case-startup-timeout-seconds", type=int, default=10800)
     parser.add_argument("--case-stall-timeout-seconds", type=int, default=900)
     parser.add_argument("--control-plane", default="cn-seed")
@@ -65,7 +71,10 @@ def is_resolved(row: dict[str, Any]) -> bool:
 
     return (
         row.get("status") == "DONE"
-        and row.get("last_val_loss") is not None
+        and (
+            row.get("last_val_loss") is not None
+            or row.get("failure_kind") == "nan_or_divergence"
+        )
         and int(row.get("last_step") or -1) == int(row.get("total_steps") or -2)
     )
 
@@ -76,15 +85,24 @@ def unresolved_cases(
     stamp: str,
     case_startup_timeout_seconds: int = 10800,
     case_stall_timeout_seconds: int = 900,
+    force_case_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     if case_startup_timeout_seconds < 1:
         raise ValueError("case_startup_timeout_seconds must be positive")
     if case_stall_timeout_seconds < 1:
         raise ValueError("case_stall_timeout_seconds must be positive")
     resolved = {str(row["case_id"]) for row in rows if is_resolved(row)}
+    requested = set(force_case_ids or ())
+    known = {str(case["case_id"]) for case in manifest}
+    unknown = requested - known
+    if unknown:
+        raise ValueError(f"Forced case IDs are absent from source manifest: {unknown}")
     cases = []
     for original in manifest:
-        if str(original["case_id"]) in resolved:
+        case_id = str(original["case_id"])
+        if requested and case_id not in requested:
+            continue
+        if not requested and case_id in resolved:
             continue
         case = copy.deepcopy(original)
         case["env"]["TRACK3_STAMP"] = stamp
@@ -100,6 +118,7 @@ def unresolved_cases(
         case["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] = "0"
+        case["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] = "1"
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "0"
         case["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] = "120"
         # Preserve case_id and every scientific environment value so the
@@ -168,6 +187,7 @@ def main() -> None:
         args.stamp,
         case_startup_timeout_seconds=args.case_startup_timeout_seconds,
         case_stall_timeout_seconds=args.case_stall_timeout_seconds,
+        force_case_ids=set(args.force_case_id),
     )
     if not cases:
         print(json.dumps({"stamp": args.stamp, "cases": 0, "complete": True}, indent=2))

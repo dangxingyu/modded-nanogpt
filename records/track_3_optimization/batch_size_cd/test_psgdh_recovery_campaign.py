@@ -33,6 +33,16 @@ def test_is_resolved_requires_full_done_terminal() -> None:
             "last_val_loss": 3.2,
         }
     )
+    assert recovery.is_resolved(
+        {
+            "case_id": "case-0",
+            "status": "DONE",
+            "last_step": 10,
+            "total_steps": 10,
+            "last_val_loss": None,
+            "failure_kind": "nan_or_divergence",
+        }
+    )
     assert not recovery.is_resolved(
         {
             "case_id": "case-0",
@@ -69,6 +79,7 @@ def test_unresolved_cases_preserve_identity_and_science() -> None:
     assert "TRACK3_EXPLICIT_GRADIENT_WORKS" not in cases[0]["env"]
     assert "TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION" not in cases[0]["env"]
     assert cases[0]["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] == "0"
+    assert cases[0]["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] == "1"
     assert manifest[1]["env"]["TRACK3_STAMP"] == "source"
 
 
@@ -77,3 +88,24 @@ def test_single_case_recovery_still_packs_one_32_gpu_job() -> None:
     assert schedule["worker_count"] == 4
     assert schedule["case_count"] == 1
     assert [len(queue["cases"]) for queue in schedule["worker_queues"]] == [1, 0, 0, 0]
+
+
+def test_forced_cases_replay_only_requested_source_entries() -> None:
+    manifest = [_case(0), _case(1), _case(2)]
+    rows = [
+        {
+            "case_id": case["case_id"],
+            "status": "DONE",
+            "last_step": 10,
+            "total_steps": 10,
+            "last_val_loss": 3.2,
+        }
+        for case in manifest
+    ]
+    cases = recovery.unresolved_cases(
+        manifest,
+        rows,
+        "barrier-smoke",
+        force_case_ids={"case-0", "case-2"},
+    )
+    assert [case["case_id"] for case in cases] == ["case-0", "case-2"]
