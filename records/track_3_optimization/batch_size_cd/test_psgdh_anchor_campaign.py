@@ -41,6 +41,9 @@ def test_anchor_cases_allow_cold_psgd_compile_to_finish():
     assert {
         case["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] for case in cases
     } == {"1800"}
+    assert {
+        case["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] for case in cases
+    } == {"900"}
 
 
 def test_schedule_is_packed_and_balanced():
