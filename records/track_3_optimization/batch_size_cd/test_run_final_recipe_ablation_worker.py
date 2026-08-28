@@ -129,6 +129,23 @@ def test_completion_preflight_times_out_hdfs_metadata_lookup(
     assert time.monotonic() - started < 2
 
 
+def test_completion_preflight_retries_transient_hdfs_false_negative(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = terminal_env(tmp_path, stamp="preflight-retry")
+    env["TRACK3_COMPLETION_PREFLIGHT_ATTEMPTS"] = "3"
+    env["TRACK3_COMPLETION_PREFLIGHT_RETRY_SECONDS"] = "0"
+    observations = iter((False, False, True))
+    monkeypatch.setattr(worker, "completed_case", lambda _env: next(observations))
+
+    complete, timed_out = worker.completed_case_preflight(
+        env, timeout_seconds=1
+    )
+
+    assert complete is True
+    assert timed_out is False
+
+
 def test_completion_preflight_refuses_non_main_thread(tmp_path) -> None:
     env = terminal_env(tmp_path, stamp="preflight-thread")
     errors: list[BaseException] = []

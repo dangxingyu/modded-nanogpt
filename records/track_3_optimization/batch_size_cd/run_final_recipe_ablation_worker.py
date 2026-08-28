@@ -66,6 +66,8 @@ DEFAULT_STARTUP_TIMEOUT_SECONDS = 10 * 60
 DEFAULT_STALL_TIMEOUT_SECONDS = 5 * 60
 DEFAULT_POST_TERMINAL_GRACE_SECONDS = 3 * 60
 DEFAULT_COMPLETION_PREFLIGHT_TIMEOUT_SECONDS = 2 * 60
+DEFAULT_COMPLETION_PREFLIGHT_ATTEMPTS = 5
+DEFAULT_COMPLETION_PREFLIGHT_RETRY_SECONDS = 2
 DEFAULT_TERMINATE_GRACE_SECONDS = 30
 DEFAULT_CLEANUP_GRACE_SECONDS = 2
 DEFAULT_MAX_ATTEMPTS_PER_WORKER = 3
@@ -185,7 +187,29 @@ def completed_case_preflight(
     signal.signal(signal.SIGALRM, alarm_handler)
     signal.setitimer(signal.ITIMER_REAL, timeout)
     try:
-        return completed_case(env), False
+        attempts = positive_int_from_env(
+            env,
+            "TRACK3_COMPLETION_PREFLIGHT_ATTEMPTS",
+            DEFAULT_COMPLETION_PREFLIGHT_ATTEMPTS,
+        )
+        retry_seconds = timeout_from_env(
+            env,
+            "TRACK3_COMPLETION_PREFLIGHT_RETRY_SECONDS",
+            DEFAULT_COMPLETION_PREFLIGHT_RETRY_SECONDS,
+        )
+        for attempt in range(1, attempts + 1):
+            if completed_case(env):
+                if attempt > 1:
+                    print(
+                        "TRACK3_FINAL_ABLATION_COMPLETION_PREFLIGHT_RECOVERED "
+                        f"case_id={env.get('TRACK3_CASE_ID', 'unknown')} "
+                        f"attempt={attempt}/{attempts}",
+                        flush=True,
+                    )
+                return True, False
+            if attempt < attempts and retry_seconds > 0:
+                time.sleep(retry_seconds)
+        return False, False
     except CompletionPreflightTimeout:
         print(
             "TRACK3_FINAL_ABLATION_COMPLETION_PREFLIGHT_TIMEOUT "
