@@ -1082,9 +1082,12 @@ def load_terminal_cache(
         rows = list(csv.DictReader(handle))
     cache: dict[tuple[str, str], dict[str, str]] = {}
     for row in rows:
-        if not row.get("job_run_id") or row.get("status") not in TERMINAL_STATUSES:
+        # Only successful child evidence is immutable.  A packed child may be
+        # marked FAILED while the outer job is still running and then succeed
+        # in a later per-case or robust retry under the same job_run_id.
+        if not row.get("job_run_id") or row.get("status") != "DONE":
             continue
-        if row.get("status") == "DONE" and not has_terminal_child_evidence(row):
+        if not has_terminal_child_evidence(row):
             continue
         cache[(row["job_run_id"], row.get("case_id", ""))] = row
     return cache
