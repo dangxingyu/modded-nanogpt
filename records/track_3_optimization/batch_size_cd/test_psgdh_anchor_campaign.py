@@ -55,6 +55,29 @@ def test_unguaranteed_quota_is_an_explicit_payload_mode():
     }
 
 
+def test_explicit_unlisted_parent_group_preserves_exact_route(monkeypatch):
+    monkeypatch.setattr(
+        campaign.packed,
+        "live_resource_check",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            SystemExit("Expected one exact live resource row, found 0")
+        ),
+    )
+    value = SimpleNamespace(
+        allow_unlisted_resource=True,
+        group_id=2145,
+        cluster_id=48,
+        queue_name="h20-parent-queue",
+        gpuv="NVIDIA_H20",
+    )
+    evidence = campaign.live_resource_evidence(value, 256)
+    assert evidence["group_sid"] == "2145"
+    assert evidence["cluster_sid"] == "48"
+    assert evidence["queue_name"] == "h20-parent-queue"
+    assert evidence["requested_gpus"] == 256
+    assert evidence["query_scope"] == "explicitly_authorized_unlisted_parent_group"
+
+
 def test_batch_and_center_are_explicitly_reusable_for_later_rounds():
     value = args()
     value.batch = "1m"

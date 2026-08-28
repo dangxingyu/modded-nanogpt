@@ -108,6 +108,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--role-cpu", type=int, default=112)
     parser.add_argument("--role-memory", type=int, default=1859584)
     parser.add_argument("--use-unguaranteed-quota", action="store_true")
+    parser.add_argument(
+        "--allow-unlisted-resource",
+        action="store_true",
+        help="Submit to an explicitly authorized parent group absent from resource listing.",
+    )
     parser.add_argument("--image-url", default=core.DEFAULT_IMAGE)
     parser.add_argument("--repo-mnt", default="/opt/tiger/modded-nanogpt")
     parser.add_argument("--seed", type=int, default=1)
@@ -250,6 +255,25 @@ def apply_quota_mode(payload: dict[str, Any], use_unguaranteed_quota: bool) -> N
         }
 
 
+def live_resource_evidence(args: argparse.Namespace, requested_gpus: int) -> dict[str, Any]:
+    try:
+        return packed.live_resource_check(args, requested_gpus)
+    except SystemExit as exc:
+        if not args.allow_unlisted_resource:
+            raise
+        return {
+            "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "group_sid": str(args.group_id),
+            "cluster_sid": str(args.cluster_id),
+            "queue_name": args.queue_name,
+            "gpu_type": packed.resource_gpu_name(args.gpuv),
+            "requested_gpus": requested_gpus,
+            "capacity_sufficient_at_submit": None,
+            "query_scope": "explicitly_authorized_unlisted_parent_group",
+            "note": str(exc),
+        }
+
+
 def main() -> None:
     args = parse_args()
     if args.submit and args.dry_run:
@@ -300,7 +324,7 @@ def main() -> None:
     print(json.dumps(summary, indent=2), flush=True)
     if not args.submit:
         return
-    live = packed.live_resource_check(args, args.workers * 8)
+    live = live_resource_evidence(args, args.workers * 8)
     launch = packed.submit_payload(args, payload_path)
     receipt = {
         **summary,
