@@ -31,7 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--submit", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--case-startup-timeout-seconds", type=int, default=1800)
+    parser.add_argument("--case-startup-timeout-seconds", type=int, default=2700)
     parser.add_argument("--case-stall-timeout-seconds", type=int, default=300)
     parser.add_argument("--control-plane", default="cn-seed")
     parser.add_argument("--group-id", type=int, default=2090)
@@ -74,7 +74,7 @@ def unresolved_cases(
     manifest: list[dict[str, Any]],
     rows: list[dict[str, Any]],
     stamp: str,
-    case_startup_timeout_seconds: int = 1800,
+    case_startup_timeout_seconds: int = 2700,
     case_stall_timeout_seconds: int = 300,
 ) -> list[dict[str, Any]]:
     if case_startup_timeout_seconds < 1:
