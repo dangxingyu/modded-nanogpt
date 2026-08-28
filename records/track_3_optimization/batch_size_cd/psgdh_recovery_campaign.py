@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--submit", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--case-startup-timeout-seconds", type=int, default=1800)
     parser.add_argument("--case-stall-timeout-seconds", type=int, default=300)
     parser.add_argument("--control-plane", default="cn-seed")
     parser.add_argument("--group-id", type=int, default=2090)
@@ -73,8 +74,11 @@ def unresolved_cases(
     manifest: list[dict[str, Any]],
     rows: list[dict[str, Any]],
     stamp: str,
+    case_startup_timeout_seconds: int = 1800,
     case_stall_timeout_seconds: int = 300,
 ) -> list[dict[str, Any]]:
+    if case_startup_timeout_seconds < 1:
+        raise ValueError("case_startup_timeout_seconds must be positive")
     if case_stall_timeout_seconds < 1:
         raise ValueError("case_stall_timeout_seconds must be positive")
     resolved = {str(row["case_id"]) for row in rows if is_resolved(row)}
@@ -84,6 +88,9 @@ def unresolved_cases(
             continue
         case = copy.deepcopy(original)
         case["env"]["TRACK3_STAMP"] = stamp
+        case["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] = str(
+            case_startup_timeout_seconds
+        )
         case["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] = str(
             case_stall_timeout_seconds
         )
@@ -151,6 +158,7 @@ def main() -> None:
         manifest,
         rows,
         args.stamp,
+        case_startup_timeout_seconds=args.case_startup_timeout_seconds,
         case_stall_timeout_seconds=args.case_stall_timeout_seconds,
     )
     if not cases:
