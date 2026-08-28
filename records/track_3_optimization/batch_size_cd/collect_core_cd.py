@@ -176,7 +176,7 @@ def list_runs(stamp: str, page_size: int) -> list[dict[str, Any]]:
                 )
             except RuntimeError as exc:
                 print(f"warning: list_runs failed for {stamp} query={query!r}: {exc}", flush=True)
-                continue
+                break
             page = obj.get("list", [])
             for item in page:
                 env = item.get("meta", {}).get("job_def_version", {}).get("env", {})
