@@ -385,6 +385,20 @@ def _patch_psgdh_from_pr316(text: str) -> str:
     """
 
     text = text.replace("train_gpt_simple.py", "train_psgdh_track3.py", 1)
+    import_marker = "import os\n"
+    if text.count(import_marker) != 1:
+        raise RuntimeError("Expected one PSGD os import")
+    text = text.replace(
+        import_marker,
+        import_marker
+        + 'if os.environ.get("TRACK3_ISOLATE_INDUCTOR_CACHE", "1") == "1":\n'
+        + '    _track3_local_rank = os.environ.get("LOCAL_RANK", "0")\n'
+        + '    os.environ.setdefault(\n'
+        + '        "TORCHINDUCTOR_CACHE_DIR",\n'
+        + '        f"/tmp/torchinductor_track3_rank_{_track3_local_rank}",\n'
+        + '    )\n',
+        1,
+    )
     optimizer_marker = "optimizers = [optimizer1, optimizer2]\n"
     if text.count(optimizer_marker) != 1:
         raise RuntimeError("Expected one PSGD optimizer list")
