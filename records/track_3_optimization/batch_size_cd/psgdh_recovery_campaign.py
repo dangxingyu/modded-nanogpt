@@ -61,7 +61,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-package", action="store_true")
     parser.add_argument("--hdfs-code-tgz", default="")
-    parser.add_argument("--apply-bad-host-mask", action="store_true", default=True)
+    parser.add_argument(
+        "--apply-bad-host-mask",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Apply the known-bad host mask. Disable it when rehoming to a "
+            "different cluster whose host namespace does not match the mask."
+        ),
+    )
     parser.add_argument("--shampoo-sync-fences", action="store_false", default=False)
     return parser.parse_args()
 
