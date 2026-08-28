@@ -195,7 +195,7 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "TRACK3_HARDWARE_FAMILY": "H20",
                 "TRACK3_DIST_TIMEOUT_MINUTES": "180",
                 "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "10800",
-                "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "2700",
+                "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "7200",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
                 "TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5",
                 "NPROC": str(batch.nproc),

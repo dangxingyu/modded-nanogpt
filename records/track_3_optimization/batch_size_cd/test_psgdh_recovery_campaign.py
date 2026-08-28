@@ -59,7 +59,7 @@ def test_unresolved_cases_preserve_identity_and_science() -> None:
     assert [case["case_id"] for case in cases] == ["case-1"]
     assert cases[0]["env"]["TRACK3_CASE_ID"] == "case-1"
     assert cases[0]["env"]["TRACK3_STAMP"] == "recovery"
-    assert cases[0]["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] == "2700"
+    assert cases[0]["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] == "7200"
     assert cases[0]["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] == "900"
     assert cases[0]["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] == "10800"
     assert manifest[1]["env"]["TRACK3_STAMP"] == "source"
