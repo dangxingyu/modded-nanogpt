@@ -95,11 +95,11 @@ def unresolved_cases(
             case_stall_timeout_seconds
         )
         case["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "10800"
-        # Recovery must preserve the PR #316 asynchronous collective
-        # semantics even when the source manifest predates the PSGD-specific
-        # override.  Per-parameter CUDA fences reproducibly deadlock a subset
-        # of H20 workers with one rank in all_reduce and its peers in sync.
-        case["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] = "0"
+        # PSGD needs asynchronous gradient enqueue plus one completion fence
+        # after the rank-sharded optimizer work.  Force the corrected behavior
+        # even when the source manifest predates these independent controls.
+        case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "0"
+        case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "1"
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.
         cases.append(case)

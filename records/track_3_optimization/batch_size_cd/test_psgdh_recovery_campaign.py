@@ -62,7 +62,8 @@ def test_unresolved_cases_preserve_identity_and_science() -> None:
     assert cases[0]["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] == "10800"
     assert cases[0]["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] == "900"
     assert cases[0]["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] == "10800"
-    assert cases[0]["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] == "0"
+    assert cases[0]["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] == "0"
+    assert cases[0]["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] == "1"
     assert manifest[1]["env"]["TRACK3_STAMP"] == "source"
 
 

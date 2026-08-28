@@ -34,12 +34,14 @@ def test_core_recipes_fence_gradient_collectives_and_optimizer_steps():
         assert code.count("TRACK3_STRICT_COLLECTIVE_COMPLETION") == 2
         assert re.search(
             r"(?m)^(?P<i>\s*)dist\.all_reduce\(p\.grad, op=dist\.ReduceOp\.(?:SUM|AVG)\)\n"
-            r'(?P=i)if os\.environ\.get\("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1"\) == "1":\n'
+            r'(?P=i)if os\.environ\.get\("TRACK3_GRADIENT_COLLECTIVE_COMPLETION", '
+            r'os\.environ\.get\("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1"\)\) == "1":\n'
             r"(?P=i)    torch\.cuda\.synchronize\(\)",
             code,
         )
         assert re.search(
-            r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1"\) == "1":\n'
+            r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_OPTIMIZER_STEP_COMPLETION", '
+            r'os\.environ\.get\("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1"\)\) == "1":\n'
             r"(?P=i)    torch\.cuda\.synchronize\(\)\n"
             r"(?P=i)model\.zero_grad\(set_to_none=True\)",
             code,

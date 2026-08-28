@@ -644,7 +644,7 @@ def _patch_initial_parameter_sync(text: str) -> str:
 
 
 def _patch_strict_collective_completion(text: str) -> str:
-    """Complete each training collective before queueing the next phase.
+    """Optionally fence gradient collectives and the complete optimizer step.
 
     NCCL calls are host-asynchronous even when ``async_op=False``.  On the
     A100 cohort, LionH has exhibited cross-rank queue skew: one rank reaches
@@ -652,11 +652,13 @@ def _patch_strict_collective_completion(text: str) -> str:
     frames in the previous optimizer step, after which the GPUs spin without
     reaching another validation boundary.
 
-    Device completion fences after every gradient reduction and after the
-    optimizer step retain the existing arithmetic and collective order while
-    preventing that queue skew.  They do not alter tensors, optimizer state,
-    schedules, or update equations.  The safe behavior is enabled by default
-    and can be disabled only for an explicit throughput experiment.
+    The two fence sites are independently configurable.  This matters for
+    PSGD: a device fence after every gradient reduction can deadlock rank-skewed
+    NCCL enqueue, while omitting the optimizer fence lets ranks with unequal
+    preconditioner work enter the next step before their peers.  One fence
+    after the whole optimizer step preserves the arithmetic and prevents that
+    cross-step queue skew.  Other recipes retain the legacy default at both
+    sites through ``TRACK3_STRICT_COLLECTIVE_COMPLETION``.
     """
 
     reduce_pattern = re.compile(
@@ -667,7 +669,7 @@ def _patch_strict_collective_completion(text: str) -> str:
         indent = match.group("indent")
         return (
             f"{indent}dist.all_reduce(p.grad, op=dist.ReduceOp.{match.group('op')})\n"
-            f'{indent}if os.environ.get("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1") == "1":\n'
+            f'{indent}if os.environ.get("TRACK3_GRADIENT_COLLECTIVE_COMPLETION", os.environ.get("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1")) == "1":\n'
             f"{indent}    torch.cuda.synchronize()\n"
         )
 
@@ -679,7 +681,7 @@ def _patch_strict_collective_completion(text: str) -> str:
     def replace_step(match: re.Match[str]) -> str:
         indent = match.group("indent")
         return (
-            f'{indent}if os.environ.get("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1") == "1":\n'
+            f'{indent}if os.environ.get("TRACK3_OPTIMIZER_STEP_COMPLETION", os.environ.get("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1")) == "1":\n'
             f"{indent}    torch.cuda.synchronize()\n"
             f"{indent}model.zero_grad(set_to_none=True)\n"
         )
