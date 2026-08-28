@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,11 @@ COORD_ENV = {
     "aux_cooldown_frac": ("TRACK3_AUX_COOLDOWN_FRAC", "aux_cooldown_frac"),
     "matrix_cooldown_frac": ("TRACK3_H_COOLDOWN_FRAC", "hidden_cooldown_frac"),
 }
+
+
+def finite_loss_or_infinity(row: dict[str, Any]) -> float:
+    value = float(row["last_val_loss"])
+    return value if math.isfinite(value) else math.inf
 
 
 def select_round(manifest: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -37,6 +43,8 @@ def select_round(manifest: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
         raise ValueError(f"round has invalid terminals: {invalid}")
     center_case = next(case for case in manifest if case["coord"] == "center")
     center = observed[center_case["case_id"]]
+    if not math.isfinite(float(center["last_val_loss"])):
+        raise ValueError("round center has a non-finite terminal loss")
     center_env = {
         key: str(center_case["env"][key]) for key, _ in COORD_ENV.values()
     }
@@ -46,7 +54,7 @@ def select_round(manifest: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
         winner_case = min(
             candidates,
             key=lambda case: (
-                float(observed[case["case_id"]]["last_val_loss"]),
+                finite_loss_or_infinity(observed[case["case_id"]]),
                 case["case_id"],
             ),
         )
@@ -64,6 +72,11 @@ def select_round(manifest: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
             "boundary": winner_case is not center_case
             and (selected == min(values) or selected == max(values)),
             "collector_column": column,
+            "scientific_failure_case_ids": [
+                case["case_id"]
+                for case in candidates
+                if not math.isfinite(float(observed[case["case_id"]]["last_val_loss"]))
+            ],
         }
     return {
         "schema": "track3_psgdh_cd_selection_v1",
