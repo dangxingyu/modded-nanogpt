@@ -1206,3 +1206,6 @@ g340-cd51-7700-e93c-1893-204f-dc2b
 # PSGD-H 128k packed pCD trial 405406062: the same case failed all three
 # attempts with a stuck ProcessGroupNCCL watchdog and pthread_join system error.
 2605:340:cd51:7700:8c71:117c:f7a:182
+# PSGD-H 2m packed pCD trial 405569464: this host spent more than 70 minutes
+# in a CPU-saturated Inductor compile while peer H20 hosts completed two cases.
+g340-cd51-7700-36f5-e567-b7fc-ff18
