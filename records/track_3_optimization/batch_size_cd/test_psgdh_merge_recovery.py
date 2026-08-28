@@ -35,3 +35,13 @@ def test_merge_refuses_any_remaining_incomplete_case() -> None:
             manifest,
             [[row("a", "DONE", 10, 3.2), row("b", "FAILED", 4, None)]],
         )
+
+
+def test_merge_can_emit_partial_state_for_next_recovery() -> None:
+    manifest = [{"case_id": "a"}, {"case_id": "b"}]
+    merged = merge_rows(
+        manifest,
+        [[row("a", "DONE", 10, 3.2), row("b", "FAILED", 4, None)]],
+        require_complete=False,
+    )
+    assert [item["status"] for item in merged] == ["DONE", "FAILED"]

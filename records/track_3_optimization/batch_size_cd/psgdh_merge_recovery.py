@@ -32,7 +32,10 @@ def is_complete(row: dict[str, Any]) -> bool:
 
 
 def merge_rows(
-    manifest: list[dict[str, Any]], collections: list[list[dict[str, Any]]]
+    manifest: list[dict[str, Any]],
+    collections: list[list[dict[str, Any]]],
+    *,
+    require_complete: bool = True,
 ) -> list[dict[str, Any]]:
     expected = [str(case["case_id"]) for case in manifest]
     if len(expected) != len(set(expected)):
@@ -51,7 +54,7 @@ def merge_rows(
     if missing:
         raise ValueError(f"missing collected rows: {missing}")
     incomplete = [case_id for case_id in expected if not is_complete(selected[case_id])]
-    if incomplete:
+    if incomplete and require_complete:
         raise ValueError(f"incomplete collected rows: {incomplete}")
     return [selected[case_id] for case_id in expected]
 
@@ -76,6 +79,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--collected", type=Path, nargs="+", required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--allow-incomplete",
+        action="store_true",
+        help="Write the best row per case even when recovery is still needed.",
+    )
     return parser.parse_args()
 
 
@@ -84,9 +92,13 @@ def main() -> None:
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     if not isinstance(manifest, list):
         raise SystemExit("manifest must be a JSON case list")
-    rows = merge_rows(manifest, [load_rows(path) for path in args.collected])
+    rows = merge_rows(
+        manifest,
+        [load_rows(path) for path in args.collected],
+        require_complete=not args.allow_incomplete,
+    )
     write_rows(rows, args.output)
-    print(f"merged_complete_rows={len(rows)}")
+    print(f"merged_rows={len(rows)}")
     print(f"wrote {args.output}")
     print(f"wrote {args.output.with_suffix('.csv')}")
 
