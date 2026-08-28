@@ -36,6 +36,13 @@ def test_anchor_sweep_has_one_center_and_all_one_entry_arms():
             assert changed == {expected}
 
 
+def test_anchor_cases_allow_cold_psgd_compile_to_finish():
+    cases = campaign.build_cases(args())
+    assert {
+        case["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] for case in cases
+    } == {"1800"}
+
+
 def test_schedule_is_packed_and_balanced():
     cases = campaign.build_cases(args())
     schedule = campaign.schedule_cases(cases, workers=8)
