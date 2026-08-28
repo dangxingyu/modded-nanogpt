@@ -195,16 +195,17 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "TRACK3_HARDWARE_FAMILY": "H20",
                 "TRACK3_DIST_TIMEOUT_MINUTES": "180",
                 "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC": "10800",
-                # Preserve the blocking collective calls from PR #316.  The
-                # generic device-wide fences deadlock under PSGD's unequal
-                # per-rank optimizer work, while async Work.wait() lets a
-                # lightly loaded rank enqueue collectives from a later phase.
+                # Preserve PR #316's blocking collective calls and complete
+                # each gradient reduction plus the full optimizer step before
+                # another collective phase can be queued.  This mode completed
+                # 31/32 cases in the original packed 512K round, versus 14/32
+                # after the completion fences were disabled.
                 "TRACK3_STRICT_COLLECTIVE_COMPLETION": "0",
-                "TRACK3_GRADIENT_COLLECTIVE_COMPLETION": "0",
-                "TRACK3_GRADIENT_PHASE_BARRIER": "1",
+                "TRACK3_GRADIENT_COLLECTIVE_COMPLETION": "1",
+                "TRACK3_GRADIENT_PHASE_BARRIER": "0",
                 "TRACK3_GRADIENT_PHASE_COMPLETION": "0",
-                "TRACK3_OPTIMIZER_PHASE_BARRIER": "1",
-                "TRACK3_OPTIMIZER_STEP_COMPLETION": "0",
+                "TRACK3_OPTIMIZER_PHASE_BARRIER": "0",
+                "TRACK3_OPTIMIZER_STEP_COMPLETION": "1",
                 "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "10800",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
                 "TRACK3_CASE_COMPILE_GRACE_STEPS": "120",

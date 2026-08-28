@@ -74,13 +74,13 @@ def test_unresolved_cases_preserve_identity_and_science() -> None:
     assert cases[0]["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] == "120"
     assert cases[0]["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] == "10800"
     assert cases[0]["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] == "0"
-    assert cases[0]["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] == "0"
+    assert cases[0]["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] == "1"
     assert cases[0]["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] == "0"
     assert "TRACK3_EXPLICIT_GRADIENT_WORKS" not in cases[0]["env"]
     assert "TRACK3_PSGD_EXPLICIT_GATHER_COMPLETION" not in cases[0]["env"]
-    assert cases[0]["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] == "0"
-    assert cases[0]["env"]["TRACK3_GRADIENT_PHASE_BARRIER"] == "1"
-    assert cases[0]["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] == "1"
+    assert cases[0]["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] == "1"
+    assert cases[0]["env"]["TRACK3_GRADIENT_PHASE_BARRIER"] == "0"
+    assert cases[0]["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] == "0"
     assert manifest[1]["env"]["TRACK3_STAMP"] == "source"
 
 

@@ -33,20 +33,7 @@ def test_core_recipes_fence_gradient_collectives_and_optimizer_steps():
         code = core.materialize(recipe)
         assert code.count("TRACK3_STRICT_COLLECTIVE_COMPLETION") == 2
         assert "_track3_gradient_works" not in code
-        assert '_track3_phase_group = dist.new_group(backend="gloo")' in code
-        assert 'TRACK3_GRADIENT_PHASE_BARRIER", "0"' in code
-        assert re.search(
-            r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_GRADIENT_PHASE_BARRIER", '
-            r'"0"\) == "1":\n(?P=i)    dist\.barrier\(group=_track3_phase_group\)',
-            code,
-        )
         assert 'TRACK3_GRADIENT_PHASE_COMPLETION", "0"' in code
-        assert 'TRACK3_OPTIMIZER_PHASE_BARRIER", "0"' in code
-        assert re.search(
-            r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_OPTIMIZER_PHASE_BARRIER", '
-            r'"0"\) == "1":\n(?P=i)    dist\.barrier\(group=_track3_phase_group\)',
-            code,
-        )
         assert re.search(
             r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_OPTIMIZER_STEP_COMPLETION", '
             r'os\.environ\.get\("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1"\)\) == "1":\n'

@@ -652,33 +652,12 @@ def _patch_strict_collective_completion(text: str) -> str:
     frames in the previous optimizer step, after which the GPUs spin without
     reaching another validation boundary.
 
-    The fence sites are independently configurable.  This matters for PSGD:
-    a device fence after every gradient reduction can deadlock rank-skewed NCCL
-    enqueue, while omitting phase boundaries lets a fast rank enter the
-    optimizer or the next training step before its peers.  One fence after the
-    complete gradient-reduction loop and after the complete optimizer step
-    preserve the arithmetic and prevent that queue skew.  For PSGD these phase
-    boundaries use a separate host-side Gloo process group.  A barrier on the
-    default NCCL group is itself device-queued and therefore cannot prevent the
-    queue skew it is meant to guard.  Other recipes retain the legacy
-    per-gradient and optimizer defaults through
-    ``TRACK3_STRICT_COLLECTIVE_COMPLETION``.
+    The two completion sites are independently configurable.  A device fence
+    after every gradient reduction and after the complete optimizer step
+    preserves the arithmetic while preventing a rank from queueing a later
+    collective before its peers.  Other recipes retain the legacy defaults
+    through ``TRACK3_STRICT_COLLECTIVE_COMPLETION``.
     """
-
-    init_pattern = re.compile(
-        r"(?m)^(?P<indent>\s*)(?P<call>dist\.init_process_group\([^\n]+\))\n"
-    )
-
-    def replace_init(match: re.Match[str]) -> str:
-        indent = match.group("indent")
-        return (
-            f"{indent}{match.group('call')}\n"
-            f"{indent}_track3_phase_group = None\n"
-            f'{indent}if os.environ.get("TRACK3_GRADIENT_PHASE_BARRIER", "0") == "1" or os.environ.get("TRACK3_OPTIMIZER_PHASE_BARRIER", "0") == "1":\n'
-            f'{indent}    _track3_phase_group = dist.new_group(backend="gloo")\n'
-        )
-
-    text, init_count = init_pattern.subn(replace_init, text, count=1)
 
     reduce_pattern = re.compile(
         r"(?m)^(?P<indent>\s*)dist\.all_reduce\(p\.grad, op=dist\.ReduceOp\."
@@ -701,8 +680,6 @@ def _patch_strict_collective_completion(text: str) -> str:
     def replace_gradient_phase(match: re.Match[str]) -> str:
         indent = match.group("indent")
         return (
-            f'{indent}if os.environ.get("TRACK3_GRADIENT_PHASE_BARRIER", "0") == "1":\n'
-            f"{indent}    dist.barrier(group=_track3_phase_group)\n"
             f'{indent}if os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION", "0") == "1":\n'
             f"{indent}    torch.cuda.synchronize()\n"
             f"{indent}set_hparams(step)\n"
@@ -718,23 +695,15 @@ def _patch_strict_collective_completion(text: str) -> str:
     def replace_step(match: re.Match[str]) -> str:
         indent = match.group("indent")
         return (
-            f'{indent}if os.environ.get("TRACK3_OPTIMIZER_PHASE_BARRIER", "0") == "1":\n'
-            f"{indent}    dist.barrier(group=_track3_phase_group)\n"
             f'{indent}if os.environ.get("TRACK3_OPTIMIZER_STEP_COMPLETION", os.environ.get("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1")) == "1":\n'
             f"{indent}    torch.cuda.synchronize()\n"
             f"{indent}model.zero_grad(set_to_none=True)\n"
         )
 
     text, step_count = step_pattern.subn(replace_step, text, count=1)
-    if (
-        init_count != 1
-        or reduce_count != 1
-        or gradient_phase_count != 1
-        or step_count != 1
-    ):
+    if reduce_count != 1 or gradient_phase_count != 1 or step_count != 1:
         raise RuntimeError(
             "Expected one strict collective completion insertion site; "
-            f"process_group_initializers={init_count}, "
             f"gradient_reductions={reduce_count}, "
             f"gradient_phases={gradient_phase_count}, optimizer_steps={step_count}"
         )

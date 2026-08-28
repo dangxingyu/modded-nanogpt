@@ -113,14 +113,14 @@ def unresolved_cases(
             case_stall_timeout_seconds
         )
         case["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "10800"
-        # Preserve the blocking collective calls from PR #316.  Device-wide
-        # fences and async Work.wait() both changed the safe rank progression.
+        # Use the completion mode validated by the original packed 512K round.
+        # Explicit async Work.wait() and phase barriers were both less reliable.
         case["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] = "0"
-        case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "0"
-        case["env"]["TRACK3_GRADIENT_PHASE_BARRIER"] = "1"
+        case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "1"
+        case["env"]["TRACK3_GRADIENT_PHASE_BARRIER"] = "0"
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] = "0"
-        case["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] = "1"
-        case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "0"
+        case["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] = "0"
+        case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "1"
         case["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] = "120"
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.
