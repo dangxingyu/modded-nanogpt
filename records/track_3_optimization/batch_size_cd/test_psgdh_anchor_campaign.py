@@ -106,3 +106,25 @@ def test_batch_and_center_are_explicitly_reusable_for_later_rounds():
         if case["coord"] == "matrix_lr" and case["factor"] == 2**0.5
     )
     assert abs(float(high["env"]["TRACK3_MATRIX_LR_MULT"]) - 2.0) < 1e-10
+
+
+def test_cooldown_grids_move_with_the_current_center_and_keep_both_sides():
+    value = args()
+    value.center_env = [
+        "TRACK3_AUX_COOLDOWN_FRAC=0.8",
+        "TRACK3_H_COOLDOWN_FRAC=0.8",
+    ]
+    cases = campaign.build_cases(value)
+    assert len(cases) == 32
+    aux_values = {
+        float(case["env"]["TRACK3_AUX_COOLDOWN_FRAC"])
+        for case in cases
+        if case["coord"] == "aux_cooldown_frac"
+    }
+    matrix_values = {
+        float(case["env"]["TRACK3_H_COOLDOWN_FRAC"])
+        for case in cases
+        if case["coord"] == "matrix_cooldown_frac"
+    }
+    assert aux_values == {0.0, 0.2, 0.4, 0.6, 1.0}
+    assert matrix_values == {0.6, 1.0}

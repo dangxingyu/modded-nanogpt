@@ -140,17 +140,37 @@ def safe(value: float | int) -> str:
     return fmt(value).replace("-", "m").replace(".", "p")
 
 
+def cooldown_values(center: float, count: int) -> tuple[float, ...]:
+    """Return a bounded local cooldown grid around the current CD center."""
+
+    lattice = tuple(index / 5 for index in range(6))
+    candidates = [
+        value
+        for value in lattice
+        if not math.isclose(value, center, rel_tol=0.0, abs_tol=1e-12)
+    ]
+    nearest = sorted(candidates, key=lambda value: (abs(value - center), value))[
+        :count
+    ]
+    return tuple(sorted(nearest))
+
+
 def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
     batch = core.BATCH_CONFIGS[args.batch]
     train_steps = math.ceil(args.token_horizon / batch.batch_size)
+    center_env = dict(BASE_ENV)
+    center_env.update(core.parse_center_env(args.center_env))
     specs: list[tuple[str, str | None, float]] = [("center", None, 1.0)]
     for coord, env_key, values in COORDINATES:
+        if coord == "aux_cooldown_frac":
+            values = cooldown_values(float(center_env[env_key]), count=5)
+        elif coord == "matrix_cooldown_frac":
+            values = cooldown_values(float(center_env[env_key]), count=2)
         specs.extend((coord, env_key, value) for value in values)
 
     cases: list[dict[str, Any]] = []
     for index, (coord, env_key, value) in enumerate(specs):
-        env = dict(BASE_ENV)
-        env.update(core.parse_center_env(args.center_env))
+        env = dict(center_env)
         if env_key is not None:
             env[env_key] = (
                 fmt(float(env[env_key]) * value)
@@ -196,7 +216,7 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "anchor_value": (
                     None
                     if coord == "center"
-                    else float(dict(BASE_ENV, **core.parse_center_env(args.center_env))[env_key])
+                    else float(center_env[env_key])
                 ),
                 "historical_anchor_loss": 3.29082,
                 "env": env,
