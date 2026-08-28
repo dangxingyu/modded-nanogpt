@@ -42,6 +42,9 @@ def test_anchor_cases_allow_cold_psgd_compile_to_finish():
         case["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] for case in cases
     } == {"2700"}
     assert {
+        case["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] for case in cases
+    } == {"10800"}
+    assert {
         case["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] for case in cases
     } == {"900"}
 

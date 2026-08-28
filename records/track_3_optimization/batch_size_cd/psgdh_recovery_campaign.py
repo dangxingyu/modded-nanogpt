@@ -94,6 +94,7 @@ def unresolved_cases(
         case["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] = str(
             case_stall_timeout_seconds
         )
+        case["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] = "10800"
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.
         cases.append(case)
