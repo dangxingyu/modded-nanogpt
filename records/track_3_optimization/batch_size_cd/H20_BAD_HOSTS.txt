@@ -1203,3 +1203,6 @@ g340-cd51-7700-e93c-1893-204f-dc2b
 2605:340:cd51:7700:efd7:b8c8:2ad4:6731
 26.138.94.90
 2605:340:cd51:7700:598e:9ef1:4a6b:eb6a
+# PSGD-H 128k packed pCD trial 405406062: the same case failed all three
+# attempts with a stuck ProcessGroupNCCL watchdog and pthread_join system error.
+2605:340:cd51:7700:8c71:117c:f7a:182

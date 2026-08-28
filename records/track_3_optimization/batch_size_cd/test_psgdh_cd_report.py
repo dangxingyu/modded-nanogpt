@@ -95,3 +95,19 @@ def test_build_report_prefers_recovery_merged_rows(tmp_path):
 
     raw = (tmp_path / "report" / "raw_results.csv").read_text()
     assert "2.9" in raw
+
+
+def test_build_report_prefers_complete_rows_over_earlier_snapshots(tmp_path):
+    round_dir = tmp_path / "round"
+    _write_round(round_dir)
+    rows = json.loads((round_dir / "collected.json").read_text())
+    rows[0]["last_val_loss"] = 2.8
+    (round_dir / "collected_merged.json").write_text(json.dumps(rows))
+    rows[0]["last_val_loss"] = 2.7
+    (round_dir / "collected_complete.json").write_text(json.dumps(rows))
+
+    build_report([round_dir], tmp_path / "report")
+
+    raw = (tmp_path / "report" / "raw_results.csv").read_text()
+    assert "2.7" in raw
+    assert "2.8" not in raw

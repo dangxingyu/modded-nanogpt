@@ -45,6 +45,7 @@ def load_round(path: Path) -> dict[str, Any]:
         (
             candidate
             for candidate in (
+                path / "collected_complete.json",
                 path / "collected_merged.json",
                 path / "collected_final.json",
                 path / "collected.json",
