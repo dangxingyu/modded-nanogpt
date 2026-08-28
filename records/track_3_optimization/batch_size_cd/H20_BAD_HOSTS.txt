@@ -1209,3 +1209,6 @@ g340-cd51-7700-e93c-1893-204f-dc2b
 # PSGD-H 2m packed pCD trial 405569464: this host spent more than 70 minutes
 # in a CPU-saturated Inductor compile while peer H20 hosts completed two cases.
 g340-cd51-7700-36f5-e567-b7fc-ff18
+# PSGD-H 2m r4 hedge trial 405605850: NCCL system error terminated a case.
+# Last error: pthread_join failed with no such process.
+g340-cd51-7700-3fb2-e72-2c1a-4c6b
