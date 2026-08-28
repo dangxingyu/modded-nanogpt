@@ -40,6 +40,12 @@ def test_core_recipes_fence_gradient_collectives_and_optimizer_steps():
             code,
         )
         assert re.search(
+            r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_GRADIENT_PHASE_COMPLETION", "0"\) == "1":\n'
+            r"(?P=i)    torch\.cuda\.synchronize\(\)\n"
+            r"(?P=i)set_hparams\(step\)",
+            code,
+        )
+        assert re.search(
             r'(?m)^(?P<i>\s*)if os\.environ\.get\("TRACK3_OPTIMIZER_STEP_COMPLETION", '
             r'os\.environ\.get\("TRACK3_STRICT_COLLECTIVE_COMPLETION", "1"\)\) == "1":\n'
             r"(?P=i)    torch\.cuda\.synchronize\(\)\n"

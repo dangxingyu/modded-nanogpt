@@ -51,6 +51,9 @@ def test_anchor_cases_allow_cold_psgd_compile_to_finish():
         case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] for case in cases
     } == {"0"}
     assert {
+        case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] for case in cases
+    } == {"1"}
+    assert {
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] for case in cases
     } == {"1"}
 

@@ -652,13 +652,14 @@ def _patch_strict_collective_completion(text: str) -> str:
     frames in the previous optimizer step, after which the GPUs spin without
     reaching another validation boundary.
 
-    The two fence sites are independently configurable.  This matters for
-    PSGD: a device fence after every gradient reduction can deadlock rank-skewed
-    NCCL enqueue, while omitting the optimizer fence lets ranks with unequal
-    preconditioner work enter the next step before their peers.  One fence
-    after the whole optimizer step preserves the arithmetic and prevents that
-    cross-step queue skew.  Other recipes retain the legacy default at both
-    sites through ``TRACK3_STRICT_COLLECTIVE_COMPLETION``.
+    The fence sites are independently configurable.  This matters for PSGD:
+    a device fence after every gradient reduction can deadlock rank-skewed NCCL
+    enqueue, while omitting phase boundaries lets a fast rank enter the
+    optimizer or the next training step before its peers.  One fence after the
+    complete gradient-reduction loop and one after the complete optimizer step
+    preserve the arithmetic and prevent that queue skew.  Other recipes retain
+    the legacy per-gradient and optimizer defaults through
+    ``TRACK3_STRICT_COLLECTIVE_COMPLETION``.
     """
 
     reduce_pattern = re.compile(
@@ -674,6 +675,21 @@ def _patch_strict_collective_completion(text: str) -> str:
         )
 
     text, reduce_count = reduce_pattern.subn(replace_reduce, text, count=1)
+    gradient_phase_pattern = re.compile(
+        r"(?m)^(?P<indent>\s*)set_hparams\(step\)\n"
+    )
+
+    def replace_gradient_phase(match: re.Match[str]) -> str:
+        indent = match.group("indent")
+        return (
+            f'{indent}if os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION", "0") == "1":\n'
+            f"{indent}    torch.cuda.synchronize()\n"
+            f"{indent}set_hparams(step)\n"
+        )
+
+    text, gradient_phase_count = gradient_phase_pattern.subn(
+        replace_gradient_phase, text, count=1
+    )
     step_pattern = re.compile(
         r"(?m)^(?P<indent>\s*)model\.zero_grad\(set_to_none=True\)\n"
     )
@@ -687,10 +703,11 @@ def _patch_strict_collective_completion(text: str) -> str:
         )
 
     text, step_count = step_pattern.subn(replace_step, text, count=1)
-    if reduce_count != 1 or step_count != 1:
+    if reduce_count != 1 or gradient_phase_count != 1 or step_count != 1:
         raise RuntimeError(
             "Expected one strict collective completion insertion site; "
-            f"gradient_reductions={reduce_count}, optimizer_steps={step_count}"
+            f"gradient_reductions={reduce_count}, "
+            f"gradient_phases={gradient_phase_count}, optimizer_steps={step_count}"
         )
     return text
 

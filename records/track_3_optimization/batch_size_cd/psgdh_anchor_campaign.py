@@ -200,6 +200,7 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 # fence after its whole optimizer step because ranks own
                 # different matrices and therefore perform unequal work.
                 "TRACK3_GRADIENT_COLLECTIVE_COMPLETION": "0",
+                "TRACK3_GRADIENT_PHASE_COMPLETION": "1",
                 "TRACK3_OPTIMIZER_STEP_COMPLETION": "1",
                 "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "10800",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
