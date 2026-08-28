@@ -540,6 +540,52 @@ def _insert_after_initial_lr(text: str) -> str:
     return new
 
 
+def _patch_psgdh_serial_compile_warmup(text: str) -> str:
+    """Compile PSGD kernels rank by rank before the measured training loop."""
+
+    marker = "_track3_cd_apply_scaled_hparams(optimizers)\n"
+    if text.count(marker) != 1:
+        raise RuntimeError("Expected one PSGD scaled-hparam application")
+    warmup = r'''
+
+@torch.no_grad()
+def _track3_serial_psgd_compile_warmup():
+    """Compile PSGD kernels one rank at a time without touching training state."""
+    if os.environ.get("TRACK3_SERIAL_PSGD_COMPILE_WARMUP", "1") != "1":
+        return
+    world_size = dist.get_world_size()
+    rank = dist.get_rank()
+    params = optimizer2.param_groups[0]["params"]
+    precond_lr = optimizer2.param_groups[0]["precond_lr"]
+    for compile_rank in range(world_size):
+        if rank == compile_rank:
+            seen_shapes = set()
+            for base_i in range(0, len(params), world_size):
+                param_i = base_i + rank
+                if param_i >= len(params):
+                    continue
+                shape = tuple(params[param_i].squeeze().shape)
+                if shape in seen_shapes:
+                    continue
+                seen_shapes.add(shape)
+                probe = torch.ones(shape, dtype=torch.float32, device=device)
+                Q0, Q1 = init_psgd(probe)
+                psgd_update_precond(
+                    Q0, Q1, probe, torch.ones_like(probe),
+                    precond_lr=precond_lr,
+                )
+                torch.cuda.synchronize()
+                print0(
+                    f"TRACK3_PSGD_COMPILE_WARMUP rank={rank} shape={shape}",
+                    console=True,
+                )
+        dist.barrier()
+
+_track3_serial_psgd_compile_warmup()
+'''
+    return text.replace(marker, marker + warmup, 1)
+
+
 def _patch_decoupled_weight_decay(text: str) -> str:
     text = re.sub(
         r'(?m)^(?P<indent>\s*)scale_invariant_update_\(p, update, group\["lr"\]\)$',
@@ -826,6 +872,8 @@ def materialize(recipe: str) -> str:
     text = _patch_strict_collective_completion(text)
     text = text.replace("val_tokens = 20 * 524288\n", SEED_BLOCK + "\nval_tokens = 20 * 524288\n", 1)
     text = _insert_after_initial_lr(text)
+    if recipe == "psgdh_core":
+        text = _patch_psgdh_serial_compile_warmup(text)
     header = (
         "# Materialized by records/track_3_optimization/batch_size_cd/materialize_core_hparam.py\n"
         f"# recipe={recipe}\n"
