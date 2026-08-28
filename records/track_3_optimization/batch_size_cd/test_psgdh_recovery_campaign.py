@@ -59,6 +59,7 @@ def test_unresolved_cases_preserve_identity_and_science() -> None:
     assert [case["case_id"] for case in cases] == ["case-1"]
     assert cases[0]["env"]["TRACK3_CASE_ID"] == "case-1"
     assert cases[0]["env"]["TRACK3_STAMP"] == "recovery"
+    assert cases[0]["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] == "300"
     assert manifest[1]["env"]["TRACK3_STAMP"] == "source"
 
 

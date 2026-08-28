@@ -31,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--submit", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--case-stall-timeout-seconds", type=int, default=300)
     parser.add_argument("--control-plane", default="cn-seed")
     parser.add_argument("--group-id", type=int, default=2090)
     parser.add_argument("--cluster-id", type=int, default=47)
@@ -69,8 +70,13 @@ def is_resolved(row: dict[str, Any]) -> bool:
 
 
 def unresolved_cases(
-    manifest: list[dict[str, Any]], rows: list[dict[str, Any]], stamp: str
+    manifest: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    stamp: str,
+    case_stall_timeout_seconds: int = 300,
 ) -> list[dict[str, Any]]:
+    if case_stall_timeout_seconds < 1:
+        raise ValueError("case_stall_timeout_seconds must be positive")
     resolved = {str(row["case_id"]) for row in rows if is_resolved(row)}
     cases = []
     for original in manifest:
@@ -78,6 +84,9 @@ def unresolved_cases(
             continue
         case = copy.deepcopy(original)
         case["env"]["TRACK3_STAMP"] = stamp
+        case["env"]["TRACK3_CASE_STALL_TIMEOUT_SECONDS"] = str(
+            case_stall_timeout_seconds
+        )
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.
         cases.append(case)
@@ -138,7 +147,12 @@ def main() -> None:
         raise SystemExit("Use a generic pretraining_* campaign stamp")
     manifest = json.loads(args.source_manifest.read_text(encoding="utf-8"))
     rows = json.loads(args.collected.read_text(encoding="utf-8"))
-    cases = unresolved_cases(manifest, rows, args.stamp)
+    cases = unresolved_cases(
+        manifest,
+        rows,
+        args.stamp,
+        case_stall_timeout_seconds=args.case_stall_timeout_seconds,
+    )
     if not cases:
         print(json.dumps({"stamp": args.stamp, "cases": 0, "complete": True}, indent=2))
         return
