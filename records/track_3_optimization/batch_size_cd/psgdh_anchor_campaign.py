@@ -201,6 +201,7 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 # lightly loaded rank enqueue collectives from a later phase.
                 "TRACK3_STRICT_COLLECTIVE_COMPLETION": "0",
                 "TRACK3_GRADIENT_COLLECTIVE_COMPLETION": "0",
+                "TRACK3_GRADIENT_PHASE_BARRIER": "1",
                 "TRACK3_GRADIENT_PHASE_COMPLETION": "0",
                 "TRACK3_OPTIMIZER_PHASE_BARRIER": "1",
                 "TRACK3_OPTIMIZER_STEP_COMPLETION": "0",

@@ -656,9 +656,10 @@ def _patch_strict_collective_completion(text: str) -> str:
     a device fence after every gradient reduction can deadlock rank-skewed NCCL
     enqueue, while omitting phase boundaries lets a fast rank enter the
     optimizer or the next training step before its peers.  One fence after the
-    complete gradient-reduction loop and a rank-wide barrier after the complete
-    optimizer step preserve the arithmetic and prevent that queue skew.  Other
-    recipes retain the legacy per-gradient and optimizer defaults through
+    complete gradient-reduction loop and after the complete optimizer step
+    preserve the arithmetic and prevent that queue skew.  For PSGD these phase
+    boundaries use rank-wide barriers instead of device-wide synchronization.
+    Other recipes retain the legacy per-gradient and optimizer defaults through
     ``TRACK3_STRICT_COLLECTIVE_COMPLETION``.
     """
 
@@ -683,6 +684,8 @@ def _patch_strict_collective_completion(text: str) -> str:
     def replace_gradient_phase(match: re.Match[str]) -> str:
         indent = match.group("indent")
         return (
+            f'{indent}if os.environ.get("TRACK3_GRADIENT_PHASE_BARRIER", "0") == "1":\n'
+            f"{indent}    dist.barrier()\n"
             f'{indent}if os.environ.get("TRACK3_GRADIENT_PHASE_COMPLETION", "0") == "1":\n'
             f"{indent}    torch.cuda.synchronize()\n"
             f"{indent}set_hparams(step)\n"

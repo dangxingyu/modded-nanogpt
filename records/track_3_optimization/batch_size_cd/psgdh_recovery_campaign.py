@@ -117,6 +117,7 @@ def unresolved_cases(
         # fences and async Work.wait() both changed the safe rank progression.
         case["env"]["TRACK3_STRICT_COLLECTIVE_COMPLETION"] = "0"
         case["env"]["TRACK3_GRADIENT_COLLECTIVE_COMPLETION"] = "0"
+        case["env"]["TRACK3_GRADIENT_PHASE_BARRIER"] = "1"
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] = "0"
         case["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] = "1"
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "0"
