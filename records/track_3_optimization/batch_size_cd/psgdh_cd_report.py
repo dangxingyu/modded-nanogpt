@@ -41,7 +41,21 @@ def batch_sort_key(batch: str) -> tuple[int, str]:
 
 def load_round(path: Path) -> dict[str, Any]:
     manifest = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
-    collected = json.loads((path / "collected.json").read_text(encoding="utf-8"))
+    collected_path = next(
+        (
+            candidate
+            for candidate in (
+                path / "collected_merged.json",
+                path / "collected_final.json",
+                path / "collected.json",
+            )
+            if candidate.is_file()
+        ),
+        None,
+    )
+    if collected_path is None:
+        raise ValueError(f"{path}: no collected result file")
+    collected = json.loads(collected_path.read_text(encoding="utf-8"))
     selection = json.loads((path / "selection.json").read_text(encoding="utf-8"))
     if len(manifest) != len(collected) or len(manifest) != 32:
         raise ValueError(f"{path}: expected one complete 32-case round")
@@ -64,6 +78,7 @@ def load_round(path: Path) -> dict[str, Any]:
         raise ValueError(f"{path}: selection stamp does not match manifest")
     return {
         "path": path,
+        "collected_path": collected_path,
         "manifest": manifest,
         "collected": collected,
         "selection": selection,

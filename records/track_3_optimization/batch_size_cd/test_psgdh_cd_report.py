@@ -82,3 +82,16 @@ def test_build_report_orders_batches_by_token_count(tmp_path):
         round_dirs.append(round_dir)
     result = build_report(round_dirs, tmp_path / "report")
     assert result["batches"] == ["128k", "512k", "1m", "2m"]
+
+
+def test_build_report_prefers_recovery_merged_rows(tmp_path):
+    round_dir = tmp_path / "round"
+    _write_round(round_dir)
+    rows = json.loads((round_dir / "collected.json").read_text())
+    rows[0]["last_val_loss"] = 2.9
+    (round_dir / "collected_merged.json").write_text(json.dumps(rows))
+
+    build_report([round_dir], tmp_path / "report")
+
+    raw = (tmp_path / "report" / "raw_results.csv").read_text()
+    assert "2.9" in raw
