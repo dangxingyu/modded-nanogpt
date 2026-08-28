@@ -399,6 +399,34 @@ def _patch_psgdh_from_pr316(text: str) -> str:
         + '    )\n',
         1,
     )
+    aliased_padding = (
+        "            params_pad = params + [torch.empty_like(params[-1])] * "
+        "(world_size - len(params) % world_size)\n"
+    )
+    if text.count(aliased_padding) != 1:
+        raise RuntimeError("Expected one PSGD aliased padding expression")
+    text = text.replace(
+        aliased_padding,
+        "            padding = (-len(params)) % world_size\n"
+        "            params_pad = params + [\n"
+        "                torch.empty_like(params[-1]) for _ in range(padding)\n"
+        "            ]\n",
+        1,
+    )
+    skipped_collective = (
+        "                    if grad is None:\n"
+        "                        continue\n"
+    )
+    if text.count(skipped_collective) != 1:
+        raise RuntimeError("Expected one PSGD missing-gradient branch")
+    text = text.replace(
+        skipped_collective,
+        "                    if grad is None:\n"
+        "                        raise RuntimeError(\n"
+        "                            \"PSGD matrix parameter is missing a gradient\"\n"
+        "                        )\n",
+        1,
+    )
     optimizer_marker = "optimizers = [optimizer1, optimizer2]\n"
     if text.count(optimizer_marker) != 1:
         raise RuntimeError("Expected one PSGD optimizer list")

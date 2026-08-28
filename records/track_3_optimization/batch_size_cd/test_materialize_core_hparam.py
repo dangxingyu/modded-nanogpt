@@ -56,6 +56,11 @@ def test_psgdh_preserves_pr316_update_and_exposes_track3_controls():
         "dist.all_gather(params_pad[base_i:base_i + world_size], "
         "params_pad[base_i + rank])"
     ) == 1
+    assert "padding = (-len(params)) % world_size" in code
+    assert "for _ in range(padding)" in code
+    assert "(world_size - len(params) % world_size)" not in code
+    assert "PSGD matrix parameter is missing a gradient" in code
+    assert "if grad is None:\n                        continue" not in code
     assert "get_psgd_lr" not in code
     assert "get_adam_lr_scale" not in code
     assert code.index("TRACK3_ISOLATE_INDUCTOR_CACHE") < code.index("import torch")
