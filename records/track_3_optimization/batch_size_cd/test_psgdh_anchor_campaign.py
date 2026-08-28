@@ -40,7 +40,10 @@ def test_anchor_cases_allow_cold_psgd_compile_to_finish():
     cases = campaign.build_cases(args())
     assert {
         case["env"]["TRACK3_CASE_STARTUP_TIMEOUT_SECONDS"] for case in cases
-    } == {"10800"}
+    } == {"1200"}
+    assert {
+        case["env"]["TORCHINDUCTOR_COMPILE_THREADS"] for case in cases
+    } == {"4"}
     assert {
         case["env"]["TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"] for case in cases
     } == {"10800"}

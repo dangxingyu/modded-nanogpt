@@ -83,7 +83,7 @@ def unresolved_cases(
     manifest: list[dict[str, Any]],
     rows: list[dict[str, Any]],
     stamp: str,
-    case_startup_timeout_seconds: int = 10800,
+    case_startup_timeout_seconds: int = 1200,
     case_stall_timeout_seconds: int = 900,
     force_case_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
@@ -121,6 +121,11 @@ def unresolved_cases(
         case["env"]["TRACK3_GRADIENT_PHASE_COMPLETION"] = "0"
         case["env"]["TRACK3_OPTIMIZER_PHASE_BARRIER"] = "0"
         case["env"]["TRACK3_OPTIMIZER_STEP_COMPLETION"] = "1"
+        # Bound the aggregate compiler pool to 8 ranks x 4 workers rather than
+        # the default 8 x 32 workers on a 112-CPU H20 host.  This is a systems
+        # setting only and leaves the generated kernels and numerical recipe
+        # unchanged.
+        case["env"]["TORCHINDUCTOR_COMPILE_THREADS"] = "4"
         case["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] = "120"
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.

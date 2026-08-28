@@ -206,7 +206,14 @@ def build_cases(args: argparse.Namespace) -> list[dict[str, Any]]:
                 "TRACK3_GRADIENT_PHASE_COMPLETION": "0",
                 "TRACK3_OPTIMIZER_PHASE_BARRIER": "0",
                 "TRACK3_OPTIMIZER_STEP_COMPLETION": "1",
-                "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "10800",
+                # Eight ranks otherwise each create Inductor's default 32
+                # compiler workers on a 112-CPU host.  The resulting 256-way
+                # oversubscription intermittently hangs a cold PSGD graph
+                # before the first training heartbeat.  This only limits
+                # compilation parallelism; it does not change generated
+                # kernels or optimizer arithmetic.
+                "TORCHINDUCTOR_COMPILE_THREADS": "4",
+                "TRACK3_CASE_STARTUP_TIMEOUT_SECONDS": "1200",
                 "TRACK3_CASE_STALL_TIMEOUT_SECONDS": "900",
                 "TRACK3_CASE_COMPILE_GRACE_STEPS": "120",
                 "TRACK3_CASE_MAX_ATTEMPTS_PER_WORKER": "5",
