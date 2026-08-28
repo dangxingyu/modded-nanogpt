@@ -802,7 +802,15 @@ def expected_arm_count(coord: str, center_value: float, grid_mode: str) -> int:
 def best_attempt(rows: list[dict[str, Any]]) -> dict[str, Any]:
     done = [row for row in rows if row.get("status") == "DONE"]
     if done:
-        return min(done, key=lambda row: numeric(row.get("last_val_loss")) or float("inf"))
+        return min(
+            done,
+            key=lambda row: (
+                value
+                if (value := numeric(row.get("last_val_loss"))) is not None
+                and math.isfinite(value)
+                else math.inf
+            ),
+        )
     running = [row for row in rows if row.get("status") == "RUNNING"]
     if running:
         return max(running, key=lambda row: numeric(row.get("last_step")) or -1)
@@ -815,6 +823,7 @@ def terminal_losses(rows: list[dict[str, Any]]) -> list[float]:
         for row in rows
         if row.get("status") == "DONE"
         and (loss := numeric(row.get("last_val_loss"))) is not None
+        and math.isfinite(loss)
     ]
 
 

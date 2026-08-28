@@ -209,6 +209,7 @@ class CollectWrapperTest(unittest.TestCase):
         self.assertEqual(rows[0]["status"], "DONE")
         self.assertTrue(math.isnan(rows[0]["last_val_loss"]))
         self.assertEqual(rows[0]["failure_kind"], "nan_or_divergence")
+        self.assertEqual(collect.terminal_losses(rows), [])
 
 
 if __name__ == "__main__":
