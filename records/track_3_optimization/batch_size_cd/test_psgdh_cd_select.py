@@ -68,3 +68,38 @@ def test_select_round_treats_nonfinite_arm_as_resolved_negative_result():
     assert selected["evidence"]["precond_lr"]["scientific_failure_case_ids"] == [
         divergent
     ]
+
+
+def test_select_round_keeps_subthreshold_move_as_raw_evidence():
+    args = SimpleNamespace(
+        stamp="pretraining_test_psgdh_threshold",
+        token_horizon=3250 * 512 * 1024,
+        seed=1,
+        track3_data_hdfs="hdfs://example/data",
+        output_base="/mnt/hdfs/example/runs",
+        batch="512k",
+        center_env=[],
+    )
+    manifest = psgdh_anchor_campaign.build_cases(args)
+    rows = []
+    raw_best_case_id = ""
+    for case in manifest:
+        loss = 3.01 if case["coord"] != "center" else 3.0
+        if case["coord"] == "matrix_lr" and case["factor"] == 2**0.5:
+            loss = 2.999
+            raw_best_case_id = case["case_id"]
+        rows.append(
+            {
+                "case_id": case["case_id"],
+                "status": "DONE",
+                "last_step": case["train_steps"],
+                "total_steps": case["train_steps"],
+                "last_val_loss": loss,
+            }
+        )
+    selected = select_round(manifest, rows, min_improvement=0.003)
+    evidence = selected["evidence"]["matrix_lr"]
+    assert selected["center_env"]["TRACK3_MATRIX_LR_MULT"] == "1"
+    assert evidence["winner_case_id"] == selected["center_case_id"]
+    assert evidence["raw_best_case_id"] == raw_best_case_id
+    assert 0 < evidence["raw_improvement"] < 0.003

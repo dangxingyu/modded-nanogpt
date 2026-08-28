@@ -27,7 +27,14 @@ def finite_loss_or_infinity(row: dict[str, Any]) -> float:
     return value if math.isfinite(value) else math.inf
 
 
-def select_round(manifest: list[dict[str, Any]], rows: list[dict[str, Any]]) -> dict[str, Any]:
+def select_round(
+    manifest: list[dict[str, Any]],
+    rows: list[dict[str, Any]],
+    *,
+    min_improvement: float = 0.003,
+) -> dict[str, Any]:
+    if min_improvement < 0:
+        raise ValueError("min_improvement must be non-negative")
     cases = {case["case_id"]: case for case in manifest}
     observed = {row["case_id"]: row for row in rows if row["case_id"] in cases}
     if set(observed) != set(cases):
@@ -51,12 +58,19 @@ def select_round(manifest: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
     evidence: dict[str, Any] = {}
     for coordinate, (env_key, column) in COORD_ENV.items():
         candidates = [center_case] + [case for case in manifest if case["coord"] == coordinate]
-        winner_case = min(
+        raw_winner_case = min(
             candidates,
             key=lambda case: (
                 finite_loss_or_infinity(observed[case["case_id"]]),
                 case["case_id"],
             ),
+        )
+        raw_winner = observed[raw_winner_case["case_id"]]
+        raw_improvement = float(center["last_val_loss"]) - float(
+            raw_winner["last_val_loss"]
+        )
+        winner_case = (
+            raw_winner_case if raw_improvement >= min_improvement else center_case
         )
         winner = observed[winner_case["case_id"]]
         center_env[env_key] = str(winner_case["env"][env_key])
@@ -67,6 +81,10 @@ def select_round(manifest: list[dict[str, Any]], rows: list[dict[str, Any]]) -> 
             "winner_loss": float(winner["last_val_loss"]),
             "center_loss": float(center["last_val_loss"]),
             "improvement": float(center["last_val_loss"]) - float(winner["last_val_loss"]),
+            "raw_best_case_id": raw_winner_case["case_id"],
+            "raw_best_loss": float(raw_winner["last_val_loss"]),
+            "raw_improvement": raw_improvement,
+            "min_improvement": min_improvement,
             "selected_value": selected,
             "center_value": float(center_case["env"][env_key]),
             "boundary": winner_case is not center_case
@@ -99,10 +117,12 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--collected", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--min-improvement", type=float, default=0.003)
     args = parser.parse_args()
     result = select_round(
         json.loads(args.manifest.read_text(encoding="utf-8")),
         json.loads(args.collected.read_text(encoding="utf-8")),
+        min_improvement=args.min_improvement,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
