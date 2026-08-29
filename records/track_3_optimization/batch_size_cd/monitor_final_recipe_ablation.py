@@ -42,7 +42,7 @@ SKIP_COMPLETE_RE = re.compile(
 )
 TERMINAL_VAL_RE = re.compile(
     r"^step:(?P<step>\d+)/(?P<total>\d+)\s+"
-    r"val_loss:(?P<loss>[-+0-9.eE]+)",
+    r"val_loss:(?P<loss>\S+)",
     re.MULTILINE,
 )
 
@@ -98,16 +98,19 @@ def strict_terminal_cases_from_stdout(
             loss = float(terminal.group("loss"))
         except ValueError:
             continue
-        if not math.isfinite(loss):
-            continue
-        strict[case_id] = {
+        evidence = {
             "case_id": case_id,
             "step": int(terminal.group("step")),
             "total": int(terminal.group("total")),
-            "terminal_val_loss": loss,
             "host": host,
             "evidence": "case_end_done_exit0_persisted1",
         }
+        if math.isfinite(loss):
+            evidence["terminal_val_loss"] = loss
+        else:
+            evidence["terminal_val_loss"] = None
+            evidence["failure_kind"] = "nan_or_divergence"
+        strict[case_id] = evidence
     return strict
 
 

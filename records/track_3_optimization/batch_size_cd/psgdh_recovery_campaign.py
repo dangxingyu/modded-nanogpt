@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import shlex
 import time
 from pathlib import Path
 from typing import Any
@@ -61,6 +62,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--skip-package", action="store_true")
     parser.add_argument("--hdfs-code-tgz", default="")
+    parser.add_argument(
+        "--hdfs-inductor-cache-tar",
+        default="",
+        help=(
+            "Optional trusted Inductor cache snapshot to extract under /tmp "
+            "before the packed worker starts. This changes startup only, not "
+            "the generated training recipe."
+        ),
+    )
     parser.add_argument(
         "--apply-bad-host-mask",
         action=argparse.BooleanOptionalAction,
@@ -187,6 +197,28 @@ def schedule_recovery_cases(
     }
 
 
+def apply_inductor_cache_snapshot(
+    payload: dict[str, Any], hdfs_cache_tar: str
+) -> None:
+    """Preload a cache produced by the same code, image, and GPU cohort."""
+
+    if not hdfs_cache_tar:
+        return
+    script = str(payload["entrypoint_full_script"])
+    marker = 'cd "$TRACK3_REPO"\n'
+    if script.count(marker) != 1:
+        raise ValueError("expected one repository cd marker in packed entrypoint")
+    quoted = shlex.quote(hdfs_cache_tar)
+    preload = (
+        "rm -rf /tmp/torchinductor_tiger /tmp/track3_inductor_cache.tar\n"
+        f"hdfs dfs -get {quoted} /tmp/track3_inductor_cache.tar\n"
+        "tar -xf /tmp/track3_inductor_cache.tar -C /tmp\n"
+    )
+    payload["entrypoint_full_script"] = script.replace(
+        marker, marker + preload, 1
+    )
+
+
 def main() -> None:
     args = parse_args()
     if args.submit and args.dry_run:
@@ -226,6 +258,7 @@ def main() -> None:
     payload = packed.build_payload(
         args, args.batch, workers, schedule_path.read_bytes(), code_tgz
     )
+    apply_inductor_cache_snapshot(payload, args.hdfs_inductor_cache_tar)
     anchor.apply_quota_mode(payload, args.use_unguaranteed_quota)
     payload["caption"] = f"m14.2-pretraining-psgdh-recovery-{args.batch}-{args.stamp[-13:]}"[:90]
     payload["comment"] = (
@@ -247,6 +280,7 @@ def main() -> None:
         "manifest": str(manifest_path),
         "payload": str(payload_path),
         "hdfs_code_tgz": code_tgz,
+        "hdfs_inductor_cache_tar": args.hdfs_inductor_cache_tar,
     }
     print(json.dumps(summary, indent=2), flush=True)
     if not args.submit:

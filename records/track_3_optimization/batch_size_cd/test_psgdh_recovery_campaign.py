@@ -111,3 +111,21 @@ def test_forced_cases_replay_only_requested_source_entries() -> None:
         force_case_ids={"case-0", "case-2"},
     )
     assert [case["case_id"] for case in cases] == ["case-0", "case-2"]
+
+
+def test_inductor_cache_snapshot_is_loaded_after_repository_setup() -> None:
+    payload = {
+        "entrypoint_full_script": (
+            'cp -a /tmp/code/. "$TRACK3_REPO"/\n'
+            'cd "$TRACK3_REPO"\n'
+            "python worker.py\n"
+        )
+    }
+    recovery.apply_inductor_cache_snapshot(
+        payload, "hdfs://haruna/user/test/cache snapshot.tar"
+    )
+    script = payload["entrypoint_full_script"]
+    assert script.index('cd "$TRACK3_REPO"') < script.index("hdfs dfs -get")
+    assert "'hdfs://haruna/user/test/cache snapshot.tar'" in script
+    assert "tar -xf /tmp/track3_inductor_cache.tar -C /tmp" in script
+    assert script.index("tar -xf") < script.index("python worker.py")

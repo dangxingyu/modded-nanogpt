@@ -353,14 +353,19 @@ TRACK3_FINAL_ABLATION_CASE_END worker=0 position=1 case_id=not-persisted attempt
 TRACK3_FINAL_ABLATION_CASE_START worker=0 position=2 case_id=partial attempt=1
 step:400/813 val_loss:3.88
 TRACK3_FINAL_ABLATION_CASE_END worker=0 position=2 case_id=partial attempt=1 status=done exit_code=0 persisted=1 elapsed_seconds=1 watchdog_reason=none requeued=0
+TRACK3_FINAL_ABLATION_CASE_START worker=0 position=3 case_id=diverged attempt=1
+step:813/813 val_loss:nan
+TRACK3_FINAL_ABLATION_CASE_END worker=0 position=3 case_id=diverged attempt=1 status=done exit_code=0 persisted=1 elapsed_seconds=1 watchdog_reason=none requeued=0
 """
 
     strict = monitor.strict_terminal_cases_from_stdout(stdout, "host-a")
 
-    assert set(strict) == {"good"}
+    assert set(strict) == {"good", "diverged"}
     assert strict["good"]["step"] == strict["good"]["total"] == 813
     assert strict["good"]["terminal_val_loss"] == 3.33
     assert strict["good"]["host"] == "host-a"
+    assert strict["diverged"]["terminal_val_loss"] is None
+    assert strict["diverged"]["failure_kind"] == "nan_or_divergence"
 
 
 @pytest.mark.parametrize(

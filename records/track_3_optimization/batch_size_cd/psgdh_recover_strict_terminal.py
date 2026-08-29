@@ -43,25 +43,35 @@ def recover_rows(
         step = int(evidence["step"])
         total = int(evidence["total"])
         expected = int(row.get("train_steps") or total)
-        loss = float(evidence["terminal_val_loss"])
+        loss = evidence.get("terminal_val_loss")
+        failure_kind = str(evidence.get("failure_kind") or "")
         if (
             evidence.get("evidence") != "case_end_done_exit0_persisted1"
             or step != total
             or total != expected
-            or loss != loss
+            or (loss is None and failure_kind != "nan_or_divergence")
         ):
             recovered.append(row)
             continue
+        if loss is not None:
+            loss = float(loss)
+            if loss != loss:
+                recovered.append(row)
+                continue
         row.update(
             {
                 "status": "DONE",
-                "failure_kind": "",
+                "failure_kind": failure_kind,
                 "last_step": step,
                 "total_steps": total,
                 "last_val_step": step,
                 "last_val_loss": loss,
                 "best_val_loss": loss,
-                "num_val_points": max(int(row.get("num_val_points") or 0), 1),
+                "num_val_points": (
+                    max(int(row.get("num_val_points") or 0), 1)
+                    if loss is not None
+                    else int(row.get("num_val_points") or 0)
+                ),
                 "trial_id": trial_id,
                 "log_source": "merlin_strict_terminal",
                 "terminal_evidence": evidence["evidence"],

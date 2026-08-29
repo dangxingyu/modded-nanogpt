@@ -54,3 +54,18 @@ def test_rejects_terminal_evidence_for_the_wrong_horizon() -> None:
         [row()], [("trial-old", {"case-a": exact_evidence(total=9)})]
     )
     assert rows[0]["status"] == "FAILED"
+
+
+def test_recovers_exact_persisted_terminal_divergence() -> None:
+    evidence = exact_evidence()
+    evidence["terminal_val_loss"] = None
+    evidence["failure_kind"] = "nan_or_divergence"
+
+    rows = recovery.recover_rows(
+        [row()], [("trial-old", {"case-a": evidence})]
+    )
+
+    assert rows[0]["status"] == "DONE"
+    assert rows[0]["last_step"] == rows[0]["total_steps"] == 10
+    assert rows[0]["last_val_loss"] is None
+    assert rows[0]["failure_kind"] == "nan_or_divergence"
