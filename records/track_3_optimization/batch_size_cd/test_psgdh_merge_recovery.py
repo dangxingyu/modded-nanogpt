@@ -54,3 +54,13 @@ def test_terminal_nan_is_complete_scientific_divergence() -> None:
 
     assert len(merged) == 1
     assert merged[0]["status"] == "DONE"
+
+
+def test_terminal_divergence_without_finite_loss_is_complete() -> None:
+    manifest = [{"case_id": "a"}]
+    divergent = row("a", "DONE", 10, None)
+    divergent["failure_kind"] = "nan_or_divergence"
+
+    merged = merge_rows(manifest, [[divergent]])
+
+    assert merged == [divergent]
