@@ -23,8 +23,17 @@ COORD_ENV = {
 
 
 def finite_loss_or_infinity(row: dict[str, Any]) -> float:
+    if row.get("last_val_loss") is None:
+        return math.inf
     value = float(row["last_val_loss"])
     return value if math.isfinite(value) else math.inf
+
+
+def is_scientific_failure(row: dict[str, Any]) -> bool:
+    return (
+        row.get("failure_kind") == "nan_or_divergence"
+        or finite_loss_or_infinity(row) == math.inf
+    )
 
 
 def select_round(
@@ -44,7 +53,10 @@ def select_round(
         for row in observed.values()
         if row.get("status") != "DONE"
         or int(row.get("last_step") or -1) != int(row.get("total_steps") or -2)
-        or row.get("last_val_loss") is None
+        or (
+            row.get("last_val_loss") is None
+            and row.get("failure_kind") != "nan_or_divergence"
+        )
     ]
     if invalid:
         raise ValueError(f"round has invalid terminals: {invalid}")
@@ -93,7 +105,7 @@ def select_round(
             "scientific_failure_case_ids": [
                 case["case_id"]
                 for case in candidates
-                if not math.isfinite(float(observed[case["case_id"]]["last_val_loss"]))
+                if is_scientific_failure(observed[case["case_id"]])
             ],
         }
     return {

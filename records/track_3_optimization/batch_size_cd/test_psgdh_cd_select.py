@@ -70,6 +70,42 @@ def test_select_round_treats_nonfinite_arm_as_resolved_negative_result():
     ]
 
 
+def test_select_round_accepts_explicit_terminal_divergence_without_loss():
+    args = SimpleNamespace(
+        stamp="pretraining_test_psgdh_explicit_divergence",
+        token_horizon=3250 * 512 * 1024,
+        seed=1,
+        track3_data_hdfs="hdfs://example/data",
+        output_base="/mnt/hdfs/example/runs",
+        batch="512k",
+        center_env=[],
+    )
+    manifest = psgdh_anchor_campaign.build_cases(args)
+    rows = []
+    divergent = None
+    for case in manifest:
+        row = {
+            "case_id": case["case_id"],
+            "status": "DONE",
+            "last_step": case["train_steps"],
+            "total_steps": case["train_steps"],
+            "last_val_loss": 3.0,
+            "failure_kind": "",
+        }
+        if case["coord"] == "precond_lr" and case["factor"] == 2.0:
+            row["last_val_loss"] = None
+            row["failure_kind"] = "nan_or_divergence"
+            divergent = case["case_id"]
+        rows.append(row)
+
+    selected = select_round(manifest, rows)
+
+    assert selected["center_env"]["TRACK3_PRECOND_LR_MULT"] == "1"
+    assert selected["evidence"]["precond_lr"]["scientific_failure_case_ids"] == [
+        divergent
+    ]
+
+
 def test_select_round_keeps_subthreshold_move_as_raw_evidence():
     args = SimpleNamespace(
         stamp="pretraining_test_psgdh_threshold",
