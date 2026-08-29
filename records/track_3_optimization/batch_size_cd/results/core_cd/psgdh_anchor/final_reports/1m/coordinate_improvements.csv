@@ -1,0 +1,17 @@
+batch,round_index,coordinate,raw_best_case_id,raw_improvement,accepted,accepted_improvement,boundary
+1m,0,aux_beta1_om,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,0,aux_beta2_om,0022_psgdh_core_1m_aux_beta2_om_0p707106781187,0.0012900000000000134,False,0.0,False
+1m,0,aux_cooldown_frac,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,0,aux_lr_global,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,0,matrix_beta1_om,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,0,matrix_cooldown_frac,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,0,matrix_lr,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,0,precond_lr,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,1,aux_beta1_om,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,1,aux_beta2_om,0021_psgdh_core_1m_aux_beta2_om_0p5,0.0020700000000002383,False,0.0,False
+1m,1,aux_cooldown_frac,0027_psgdh_core_1m_aux_cooldown_frac_0p4,0.0006700000000003925,False,0.0,False
+1m,1,aux_lr_global,0015_psgdh_core_1m_aux_lr_global_1p41421356237,0.00021000000000004349,False,0.0,False
+1m,1,matrix_beta1_om,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,1,matrix_cooldown_frac,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,1,matrix_lr,0000_psgdh_core_1m_center_1,0.0,False,0.0,False
+1m,1,precond_lr,0000_psgdh_core_1m_center_1,0.0,False,0.0,False

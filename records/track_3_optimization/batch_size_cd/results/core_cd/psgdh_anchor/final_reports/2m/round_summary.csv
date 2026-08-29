@@ -1,0 +1,9 @@
+batch,round_index,stamp,center_loss,converged,needs_boundary_extension,accepted_coordinates
+2m,0,pretraining_psgdh_pcd_2m_r0_20260828_0828,3.37996,False,False,"matrix_cooldown_frac,matrix_lr,precond_lr"
+2m,1,pretraining_psgdh_pcd_2m_r1_centered_20260828_1333,3.36637,False,True,"aux_beta2_om,aux_lr_global,matrix_beta1_om,matrix_lr"
+2m,2,pretraining_psgdh_pcd_2m_r2_centered_code64_20260828_1727,3.36803,False,True,"aux_lr_global,matrix_beta1_om,matrix_cooldown_frac,matrix_lr"
+2m,3,pretraining_psgdh_pcd_2m_r3_centered_soil88_20260828_2048,3.36346,False,True,"matrix_beta1_om,matrix_cooldown_frac,matrix_lr"
+2m,4,pretraining_psgdh_pcd_2m_r4_centered_soil120_20260828_2357,3.37408,False,True,"matrix_beta1_om,matrix_cooldown_frac,matrix_lr"
+2m,5,pretraining_psgdh_pcd_2m_r5_paddingfix32_20260829_0556,3.36265,False,True,"matrix_beta1_om,matrix_cooldown_frac,matrix_lr"
+2m,6,pretraining_psgdh_pcd_2m_r6_split32_20260829_0750,3.37432,False,True,"matrix_beta1_om,matrix_cooldown_frac,matrix_lr"
+2m,7,pretraining_psgdh_pcd_2m_r7_greedy_best_r5_20260829_0908,3.35438,True,False,

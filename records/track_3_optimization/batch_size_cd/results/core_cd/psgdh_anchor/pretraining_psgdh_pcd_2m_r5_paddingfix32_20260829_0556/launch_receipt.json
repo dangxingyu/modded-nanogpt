@@ -1,0 +1,30 @@
+{
+  "stamp": "pretraining_psgdh_pcd_2m_r5_paddingfix32_20260829_0556",
+  "cases": 32,
+  "workers": 32,
+  "requested_h20": 256,
+  "estimated_makespan_minutes": 30.0,
+  "schedule": "/mlx_devbox/users/xingyu.dang/playground/modded-nanogpt/records/track_3_optimization/batch_size_cd/results/core_cd/psgdh_anchor/pretraining_psgdh_pcd_2m_r5_paddingfix32_20260829_0556/schedule.json",
+  "manifest": "/mlx_devbox/users/xingyu.dang/playground/modded-nanogpt/records/track_3_optimization/batch_size_cd/results/core_cd/psgdh_anchor/pretraining_psgdh_pcd_2m_r5_paddingfix32_20260829_0556/manifest.json",
+  "payload": "/mlx_devbox/users/xingyu.dang/playground/modded-nanogpt/records/track_3_optimization/batch_size_cd/payloads/psgdh_anchor/pretraining_psgdh_pcd_2m_r5_paddingfix32_20260829_0556/packed_32workers_256h20.json",
+  "hdfs_code_tgz": "hdfs://haruna/home/byte_data_seed/hdd_hldy/user/xingyu.dang/modded-nanogpt/modded-nanogpt-pretraining_psgdh_pcd_2m_r5_paddingfix32_20260829_0556-code.tgz",
+  "submitted_at": "2026-08-29T05:56:08+0800",
+  "live_resource_check": {
+    "checked_at": "2026-08-29T05:56:04+0800",
+    "group_sid": "2089",
+    "cluster_sid": "47",
+    "queue_name": "nvidia-h20.hpccluster-yecd0gve6pioxhtqvap6.ai",
+    "gpu_type": "NVIDIA-H20",
+    "requested_gpus": 256,
+    "capacity_sufficient_at_submit": null,
+    "query_scope": "explicitly_authorized_unlisted_parent_group",
+    "note": "Expected one exact live resource row, found 0"
+  },
+  "job_run_id": "25c235b6358b5a4c",
+  "response": {
+    "job_url": "https://seed.bytedance.net/development/instance/jobs/25c235b6358b5a4c",
+    "message": "Job Run 创建成功",
+    "new_job_run_id": "25c235b6358b5a4c",
+    "success": true
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "acceptance_threshold": 0.003,
+  "batches": [
+    "128k"
+  ],
+  "final_recipes": {
+    "128k": {
+      "TRACK3_AUX_BETA1_OM_MULT": "2",
+      "TRACK3_AUX_BETA2_OM_MULT": "0.5",
+      "TRACK3_AUX_COOLDOWN_FRAC": "0.5",
+      "TRACK3_AUX_LR_MULT": "2",
+      "TRACK3_H_COOLDOWN_FRAC": "1",
+      "TRACK3_MATRIX_BETA1_OM_MULT": "2",
+      "TRACK3_MATRIX_LR_MULT": "0.5",
+      "TRACK3_PRECOND_LR_MULT": "1"
+    }
+  },
+  "round_count": 3,
+  "rounds": [
+    {
+      "accepted_coordinates": "aux_beta1_om,aux_beta2_om,aux_lr_global,matrix_beta1_om,matrix_lr,precond_lr",
+      "batch": "128k",
+      "center_loss": 3.37799,
+      "converged": false,
+      "needs_boundary_extension": true,
+      "round_index": 0,
+      "stamp": "pretraining_psgdh_pcd_128k_r0_ladder_20260828_0855"
+    },
+    {
+      "accepted_coordinates": "precond_lr",
+      "batch": "128k",
+      "center_loss": 3.27196,
+      "converged": false,
+      "needs_boundary_extension": true,
+      "round_index": 1,
+      "stamp": "pretraining_psgdh_pcd_128k_r1_centered_20260828_1433"
+    },
+    {
+      "accepted_coordinates": "",
+      "batch": "128k",
+      "center_loss": 3.26353,
+      "converged": true,
+      "needs_boundary_extension": false,
+      "round_index": 2,
+      "stamp": "pretraining_psgdh_pcd_128k_r2_centered_soil128_20260828_1857"
+    }
+  ],
+  "schema": "track3_psgdh_cd_report_v1"
+}

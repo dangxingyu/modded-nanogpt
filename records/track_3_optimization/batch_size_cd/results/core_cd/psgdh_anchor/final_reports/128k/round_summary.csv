@@ -1,0 +1,4 @@
+batch,round_index,stamp,center_loss,converged,needs_boundary_extension,accepted_coordinates
+128k,0,pretraining_psgdh_pcd_128k_r0_ladder_20260828_0855,3.37799,False,True,"aux_beta1_om,aux_beta2_om,aux_lr_global,matrix_beta1_om,matrix_lr,precond_lr"
+128k,1,pretraining_psgdh_pcd_128k_r1_centered_20260828_1433,3.27196,False,True,precond_lr
+128k,2,pretraining_psgdh_pcd_128k_r2_centered_soil128_20260828_1857,3.26353,True,False,

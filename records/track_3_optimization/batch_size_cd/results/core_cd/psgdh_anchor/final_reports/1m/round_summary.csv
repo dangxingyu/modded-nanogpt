@@ -1,0 +1,3 @@
+batch,round_index,stamp,center_loss,converged,needs_boundary_extension,accepted_coordinates
+1m,0,pretraining_psgdh_pcd_1m_r0_20260828_0828,3.30441,True,False,
+1m,1,pretraining_psgdh_pcd_1m_r1_confirm_20260828_1320,3.30521,True,False,

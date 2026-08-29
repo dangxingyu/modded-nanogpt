@@ -1,0 +1,29 @@
+{
+  "acceptance_tolerance": 0.003,
+  "hardware": [
+    "NVIDIA-H20"
+  ],
+  "losses": [
+    3.27823,
+    3.2766,
+    3.2748,
+    3.27426,
+    3.27651
+  ],
+  "mean_delta_vs_reference": -0.000580000000000247,
+  "mean_loss": 3.27608,
+  "passed": true,
+  "reference_h100_losses": [
+    3.2764,
+    3.2777,
+    3.2774,
+    3.275,
+    3.2768
+  ],
+  "reference_h100_mean_loss": 3.27666,
+  "sample_standard_deviation": 0.0015833982442835907,
+  "schema": "track3_psgdh_pr316_baseline_report_v1",
+  "source": "records/track_3_optimization/results/20260527_psgd/train_psgd.py",
+  "source_sha256": "360ecc74cafd9ca30feede50bb6e4fceb87c10e4a4d450c0a82ba36bde295099",
+  "train_steps": 3400
+}
