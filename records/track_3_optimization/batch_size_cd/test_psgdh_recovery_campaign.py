@@ -113,6 +113,18 @@ def test_forced_cases_replay_only_requested_source_entries() -> None:
     assert [case["case_id"] for case in cases] == ["case-0", "case-2"]
 
 
+def test_recovery_can_reduce_compile_concurrency_without_changing_case() -> None:
+    case = recovery.unresolved_cases(
+        [_case(0)],
+        [],
+        "single-thread-compile",
+        compile_threads=1,
+    )[0]
+    assert case["case_id"] == "case-0"
+    assert case["env"]["TRACK3_CASE_ID"] == "case-0"
+    assert case["env"]["TORCHINDUCTOR_COMPILE_THREADS"] == "1"
+
+
 def test_inductor_cache_snapshot_is_loaded_after_repository_setup() -> None:
     payload = {
         "entrypoint_full_script": (

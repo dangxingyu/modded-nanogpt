@@ -40,6 +40,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--case-startup-timeout-seconds", type=int, default=10800)
     parser.add_argument("--case-stall-timeout-seconds", type=int, default=900)
+    parser.add_argument(
+        "--compile-threads",
+        type=int,
+        default=4,
+        help=(
+            "Inductor compiler workers per distributed rank. Lowering this "
+            "changes compilation concurrency only, not the generated recipe."
+        ),
+    )
     parser.add_argument("--control-plane", default="cn-seed")
     parser.add_argument("--group-id", type=int, default=2090)
     parser.add_argument("--cluster-id", type=int, default=47)
@@ -103,12 +112,15 @@ def unresolved_cases(
     stamp: str,
     case_startup_timeout_seconds: int = 1200,
     case_stall_timeout_seconds: int = 900,
+    compile_threads: int = 4,
     force_case_ids: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     if case_startup_timeout_seconds < 1:
         raise ValueError("case_startup_timeout_seconds must be positive")
     if case_stall_timeout_seconds < 1:
         raise ValueError("case_stall_timeout_seconds must be positive")
+    if compile_threads < 1:
+        raise ValueError("compile_threads must be positive")
     resolved = {str(row["case_id"]) for row in rows if is_resolved(row)}
     requested = set(force_case_ids or ())
     known = {str(case["case_id"]) for case in manifest}
@@ -143,7 +155,7 @@ def unresolved_cases(
         # the default 8 x 32 workers on a 112-CPU H20 host.  This is a systems
         # setting only and leaves the generated kernels and numerical recipe
         # unchanged.
-        case["env"]["TORCHINDUCTOR_COMPILE_THREADS"] = "4"
+        case["env"]["TORCHINDUCTOR_COMPILE_THREADS"] = str(compile_threads)
         case["env"]["TRACK3_CASE_COMPILE_GRACE_STEPS"] = "120"
         # Preserve case_id and every scientific environment value so the
         # source and recovery rows can be merged without changing identity.
@@ -233,6 +245,7 @@ def main() -> None:
         args.stamp,
         case_startup_timeout_seconds=args.case_startup_timeout_seconds,
         case_stall_timeout_seconds=args.case_stall_timeout_seconds,
+        compile_threads=args.compile_threads,
         force_case_ids=set(args.force_case_id),
     )
     if not cases:
