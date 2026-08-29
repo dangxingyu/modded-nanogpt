@@ -64,6 +64,7 @@ def test_build_report_writes_credential_free_tables(tmp_path):
     assert "job_run_id" not in (output / "raw_results.csv").read_text()
     assert "512k" in (output / "REPORT.md").read_text()
     assert "Matrix LR factor" in (output / "REPORT.md").read_text()
+    assert "actually observed recipe" in (output / "REPORT.md").read_text()
     assert (output / "coordinate_improvements.csv").is_file()
     assert (output / "center_loss_by_round.svg").is_file()
 
